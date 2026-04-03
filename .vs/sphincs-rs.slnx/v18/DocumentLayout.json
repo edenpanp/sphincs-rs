@@ -1,0 +1,243 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "E:\\Desktop\\6453\\group project\\sphincs-rs\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\group.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\group.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\benches\\sphincs_bench.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:benches\\sphincs_bench.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\xmss.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\xmss.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\params_alpha.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\params_alpha.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\lib.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\lib.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\sphincs.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\sphincs.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\params.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\params.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\hash.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\hash.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\ht.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\ht.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\tests\\kat.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:tests\\kat.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\tests\\integration.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:tests\\integration.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\Cargo.toml||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:Cargo.toml||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\adrs.rs||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\adrs.rs||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 1,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedHeight": 20,
+          "SelectedChildIndex": 1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "group.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\group.rs",
+              "RelativeDocumentMoniker": "src\\group.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\group.rs",
+              "RelativeToolTip": "src\\group.rs",
+              "ViewState": "AgIAAA8BAAAAAAAAAAAowAsBAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T13:38:24.481Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "params.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\params.rs",
+              "RelativeDocumentMoniker": "src\\params.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\params.rs",
+              "RelativeToolTip": "src\\params.rs",
+              "ViewState": "AgIAAEoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T07:06:06.844Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "params_alpha.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\params_alpha.rs",
+              "RelativeDocumentMoniker": "src\\params_alpha.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\params_alpha.rs",
+              "RelativeToolTip": "src\\params_alpha.rs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAA4AAAADAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T07:05:36.098Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "sphincs_bench.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\benches\\sphincs_bench.rs",
+              "RelativeDocumentMoniker": "benches\\sphincs_bench.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\benches\\sphincs_bench.rs",
+              "RelativeToolTip": "benches\\sphincs_bench.rs",
+              "ViewState": "AgIAAGUAAAAAAAAAAAAiwG4AAAAXAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T07:04:18.196Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "hash.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\hash.rs",
+              "RelativeDocumentMoniker": "src\\hash.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\hash.rs",
+              "RelativeToolTip": "src\\hash.rs",
+              "ViewState": "AgIAADMCAAAAAAAAAAAgwDkCAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T05:26:04.544Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "lib.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\lib.rs",
+              "RelativeDocumentMoniker": "src\\lib.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\lib.rs",
+              "RelativeToolTip": "src\\lib.rs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAEEAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T04:54:57.761Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "xmss.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\xmss.rs",
+              "RelativeDocumentMoniker": "src\\xmss.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\xmss.rs",
+              "RelativeToolTip": "src\\xmss.rs",
+              "ViewState": "AgIAADwAAAAAAAAAAAAAAD8AAAAHAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T06:15:14.012Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "ht.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\ht.rs",
+              "RelativeDocumentMoniker": "src\\ht.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\ht.rs",
+              "RelativeToolTip": "src\\ht.rs",
+              "ViewState": "AgIAAK4AAAAAAAAAAAAkwLUAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T06:15:30.471Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "sphincs.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\sphincs.rs",
+              "RelativeDocumentMoniker": "src\\sphincs.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\sphincs.rs",
+              "RelativeToolTip": "src\\sphincs.rs",
+              "ViewState": "AgIAAHIBAAAAAAAAAAAAAH4BAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T04:55:15.872Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "kat.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\tests\\kat.rs",
+              "RelativeDocumentMoniker": "tests\\kat.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\tests\\kat.rs",
+              "RelativeToolTip": "tests\\kat.rs",
+              "ViewState": "AgIAAFgBAAAAAAAAAAAuwGcBAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T06:14:02.138Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 10,
+              "Title": "integration.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\tests\\integration.rs",
+              "RelativeDocumentMoniker": "tests\\integration.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\tests\\integration.rs",
+              "RelativeToolTip": "tests\\integration.rs",
+              "ViewState": "AgIAAHcAAAAAAAAAAAAuwIYAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T06:13:55.691Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 11,
+              "Title": "Cargo.toml",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\Cargo.toml",
+              "RelativeDocumentMoniker": "Cargo.toml",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\Cargo.toml",
+              "RelativeToolTip": "Cargo.toml",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAoAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T05:26:53.418Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 12,
+              "Title": "adrs.rs",
+              "DocumentMoniker": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\adrs.rs",
+              "RelativeDocumentMoniker": "src\\adrs.rs",
+              "ToolTip": "E:\\Desktop\\6453\\group project\\sphincs-rs\\src\\adrs.rs",
+              "RelativeToolTip": "src\\adrs.rs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-04-03T04:53:35.238Z"
+            }
+          ]
+        },
+        {
+          "DockedHeight": 380,
+          "SelectedChildIndex": -1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:1:0:{d212f56b-c48a-434c-a121-1c5d80b59b9f}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

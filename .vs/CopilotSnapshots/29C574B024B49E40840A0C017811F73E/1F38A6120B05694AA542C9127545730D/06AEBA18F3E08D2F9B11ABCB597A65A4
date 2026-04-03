@@ -1,0 +1,7 @@
+﻿# Copilot Instructions
+
+## 项目指南
+- User is working in Visual Studio 2026 on a Rust project; workspace root E:\Desktop\6453\group project\sphincs-rs. Preferred shell powershell.exe. Open files include various src/*.rs and tests.
+- User runs `cargo test` and `cargo bench` in the Visual Studio environment; they enabled feature `test-utils` for tests.
+- When running tests with feature `test-utils`, several group tests failed; intention is to iterate `opt_rand` in `group_sign` to find `R` whose digest yields `member_index`. Adjust signing randomness for group signatures accordingly.
+- Fix in `group_sign` to iterate `opt_rand` until digest's `idx_leaf` equals `member_index`; remember to use a small loop modifying `pk_seed`'s last byte.

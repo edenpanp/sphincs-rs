@@ -1,0 +1,14 @@
+E:\Desktop\6453\group project\sphincs-rs\target\release\deps\serde-2e0e961f512c2fa1.d: C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs E:\Desktop\6453\group\ project\sphincs-rs\target\release\build\serde-ca321832affbf15d\out/private.rs
+
+E:\Desktop\6453\group project\sphincs-rs\target\release\deps\libserde-2e0e961f512c2fa1.rlib: C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs E:\Desktop\6453\group\ project\sphincs-rs\target\release\build\serde-ca321832affbf15d\out/private.rs
+
+E:\Desktop\6453\group project\sphincs-rs\target\release\deps\libserde-2e0e961f512c2fa1.rmeta: C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs E:\Desktop\6453\group\ project\sphincs-rs\target\release\build\serde-ca321832affbf15d\out/private.rs
+
+C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs:
+C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs:
+C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs:
+C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs:
+C:\Users\Dell\ 5510\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs:
+E:\Desktop\6453\group\ project\sphincs-rs\target\release\build\serde-ca321832affbf15d\out/private.rs:
+
+# env-dep:OUT_DIR=E:\\Desktop\\6453\\group project\\sphincs-rs\\target\\release\\build\\serde-ca321832affbf15d\\out
