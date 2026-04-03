@@ -78,26 +78,6 @@ End-to-end pipeline tests using both hashers. **8 tests.**
 
 ## KAT tests — NIST byte-exact compliance
 
-### Setup
-
-1. Download the SPHINCS+ reference implementation:
-   <https://sphincs.org/software.html> → "Reference implementation"
-
-2. Locate the KAT response file inside the archive:
-   ```
-   KAT/sphincs-sha2-256s-simple/PQCsignKAT_sphincs-sha2-256s-simple.rsp
-   ```
-
-3. Place it at (relative to the crate root):
-   ```
-   tests/kat/sphincs-sha2-256s-simple.rsp
-   ```
-
-4. Run:
-   ```bash
-   cargo test --test kat --features test-utils
-   ```
-
 ### What is checked
 
 | Test                        | Checks                                                  |
@@ -119,8 +99,6 @@ the field order is `layer[3] ‖ tree[4..12] ‖ type[3] ‖ type_bits[0..12]` (
 ---
 
 ## Benchmarks
-
-HTML reports are written to `target/criterion/` and can be opened in a browser.
 
 ### Benchmark groups
 
