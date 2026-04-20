@@ -1,11 +1,11 @@
-//! Integration tests for sphincs-rs.
+//! integration tests for sphincs-rs
 //!
-//! These tests require the `test-utils` feature to access `RawSha256`.
+//! these tests require the `test-utils` feature to access `RawSha256`
 //!
-//! Run with:
+//! run with:
 //!   cargo test --features test-utils --test integration
 
-// Gate the entire file so `cargo test` (without features) skips it cleanly.
+// gate the entire file so `cargo test` (without features) skips it cleanly
 #![cfg(feature = "test-utils")]
 
 use sphincs_rs::hash::{RawSha256, Sha256Hasher};

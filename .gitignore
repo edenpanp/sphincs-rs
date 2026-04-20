@@ -1,0 +1,6 @@
+target/
+.vs/
+*.db
+*.sqlite
+*.bin
+*.json

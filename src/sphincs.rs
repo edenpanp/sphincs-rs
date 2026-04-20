@@ -35,6 +35,7 @@ use crate::xmss::{self, XmssSig};
 
 // ── Key types ─────────────────────────────────────────────────────────────────
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SphincsSK {
     pub sk_seed: [u8; N],
     pub sk_prf:  [u8; N],
@@ -42,11 +43,13 @@ pub struct SphincsSK {
     pub pk_root: [u8; N],
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SphincsPK {
     pub pk_seed: [u8; N],
     pub pk_root: [u8; N],
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SphincsSignature {
     pub r:        [u8; N],
     pub fors_sig: ForsSig,

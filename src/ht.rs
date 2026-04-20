@@ -23,6 +23,7 @@ use crate::xmss::{self, XmssSig};
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /// An HT signature: D XMSS signatures stacked bottom-to-top.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HtSig {
     pub xmss_sigs: Vec<XmssSig>, // length D
 }

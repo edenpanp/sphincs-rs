@@ -1,491 +1,604 @@
-//! SPHINCS+ group signature scheme.
+//! cert-based SPHINCS+ + WOTS group signature (basic features)
 //!
-//! # Overview
+//! idea is not complicated:
+//! - member locally generates a bunch of WOTS one-time keys
+//! - manager does NOT touch private keys, only signs the public part
+//! - when signing, just pick one unused key + its cert
+//! - verifier checks two things: cert is valid + WOTS sig is valid
 //!
-//! A group signature allows any member of a group to sign a message on behalf
-//! of the group. The verifier learns that the signature is valid under the
-//! group's public key, but cannot determine *which* member produced it.
+//! cert does NOT include member_id (for anonymity)
+//! only manager keeps that mapping internally (for open)
 //!
-//! # Construction (based on eprint 2025/760)
-//!
-//! The construction re-uses the SPHINCS+ tree structure:
-//!
-//! ```text
-//! Group public key  =  (PK.seed, group_root)
-//!                               │
-//!               ┌───────────────┴───────────────┐
-//!        XMSS layer D-1  (shared top-level tree)
-//!               │                               │
-//!         ...                             ...
-//!               │
-//!        XMSS layer 0
-//!               │
-//!   member 0  member 1  ...  member M-1
-//!   (leaf 0)  (leaf 1)       (leaf M-1)
-//! ```
-//!
-//! **Key generation:**
-//! - The *group manager* samples a shared `PK.seed` and `SK.seed`.
-//! - Each member `i` receives a **member secret key** consisting of:
-//!   - `SK.seed` (shared master secret — used to derive their leaf)
-//!   - `SK.prf_i` (individual PRF key for message randomness)
-//!   - `member_index: i` (which leaf they own)
-//!   - `PK.seed` (public, needed for hashing)
-//! - The **group public key** is `(PK.seed, group_root)` where
-//!   `group_root` is the top-level XMSS root (= SPHINCS+ `PK.root`).
-//!
-//! **Signing:**
-//! Member `i` produces a SPHINCS+ signature where the leaf index is
-//! forced to path through leaf `i` of the hypertree. This is structurally
-//! identical to `slh_sign` except:
-//!   1. `idx_leaf` is derived from `member_index` rather than the message digest.
-//!   2. The member uses their own `SK.prf_i` for message randomness, which
-//!      is unknown to other members and the manager.
-//!
-//! **Verification:**
-//! Standard `slh_verify` — the verifier only needs the group public key.
-//!
-//! **Anonymity:**
-//! The FORS signature and authentication path do not directly reveal which
-//! XMSS leaf was used as long as multiple members share the same top-level
-//! tree structure. A full anonymity proof requires that `idx_leaf` is
-//! computationally hidden from the signature; this construction achieves
-//! *computational anonymity* under the assumption that the FORS digest
-//! acts as a pseudorandom permutation over leaf indices (see §4 of 2025/760).
-//!
-//! # Limitations vs 2025/760
-//!
-//! The paper proposes a richer construction with an opening protocol
-//! (the manager can de-anonymise a specific signature) and a revocation
-//! mechanism. Those are not implemented here; this module provides the
-//! core sign/verify/identify-within-group functionality as a foundation.
-//!
-//! # Security parameter
-//!
-//! With HP=8, one XMSS layer supports up to 2^8 = 256 members.
-//! With D layers, the full group size is up to 2^(D×HP) = 2^64 (the full
-//! leaf space of the hypertree), but practically each "group" is scoped
-//! to a single top-level XMSS tree, giving 2^HP = 256 members.
+//! this is more like a clean demo implementation, not super optimized
 
 use rand::{RngCore, rngs::OsRng};
+use sha2::{Digest, Sha256};
 
 use crate::adrs::{Adrs, AdrsType};
-use crate::fors;
 use crate::hash::SphincsHasher;
-use crate::ht;
-use crate::params::{D, HP, IDX_LEAF_BYTES, IDX_TREE_BYTES, MD_BYTES, N};
+use crate::params::{N, WOTS_LEN};
 use crate::sphincs::{
-    SphincsSignature, SphincsPK, deserialise_sig,
-    slh_verify,
+    SIG_BYTES, SphincsPK, SphincsSK, SphincsSignature, deserialise_sig, serialise_sig,
+    slh_keygen_fast, slh_sign_fast, slh_verify,
 };
-use crate::xmss;
+use crate::wots::{self, WotsSig};
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+const CERT_DOMAIN_SEP: &[u8] = b"sphincs-rs/group-cert/v2";
+const GROUP_SIG_VERSION: u8 = 1;
 
-/// The group manager's master key material.
-///
-/// The manager distributes individual [`MemberSK`]s from this.
-/// `sk_seed` is sensitive — compromise of `sk_seed` allows forging signatures
-/// for any member.
-pub struct GroupManagerKey {
-    /// Shared master secret (derives every member leaf).
-    pub sk_seed: [u8; N],
-    /// Public seed (shared with all members and verifiers).
-    pub pk_seed: [u8; N],
-    /// Pre-computed group root (top-level XMSS tree root = group PK.root).
-    pub group_root: [u8; N],
-    /// Maximum number of members (2^HP per top-level XMSS tree).
-    pub max_members: usize,
+/// fixed size for easier parsing (no dynamic stuff)
+pub const GROUP_SIGNATURE_BYTES: usize =
+    1 + 8 + 4 + N + N + SIG_BYTES + (WOTS_LEN * N);
+
+/// some basic errors for this flow
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupError {
+    EmptyBatch,
+    BatchTooLarge,
+    CertificateCountMismatch,
+    CertificateMismatch,
+    CertifiedKeyUnavailable,
+    NoUnusedCertifiedKey,
+    InvalidSignatureBytes,
 }
 
-/// A single member's secret key.
-///
-/// Derived by the manager and distributed to member `index`.
-/// Members do NOT learn `sk_seed` of other members because only the
-/// manager holds `sk_seed`; the member receives only what they need
-/// to sign at their own leaf.
+/// public half of one one-time WOTS+ keypair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OneTimePublicKey {
+    pub key_id: u32,
+    pub pk_seed: [u8; N],
+    pub wots_pk: [u8; N],
+}
+
+#[derive(Clone)]
+struct OneTimeKeyPair {
+    sk_seed: [u8; N],
+    public_key: OneTimePublicKey,
+}
+
+/// what member sends to manager
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberCertificationRequest {
+    pub member_id: u32,
+    pub keys: Vec<OneTimePublicKey>,
+}
+
+/// member-side temp batch before cert
+pub struct MemberKeyBatch {
+    pub member_id: u32,
+    keys: Vec<OneTimeKeyPair>,
+}
+
+impl MemberKeyBatch {
+    /// strip private part, keep only what manager needs
+    pub fn certification_request(&self) -> MemberCertificationRequest {
+        MemberCertificationRequest {
+            member_id: self.member_id,
+            keys: self.keys.iter().map(|key| key.public_key).collect(),
+        }
+    }
+
+    pub fn batch_size(&self) -> usize {
+        self.keys.len()
+    }
+}
+
+/// manager-signed cert
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MemberCertificate {
+    pub certificate_id: u64,
+    pub key: OneTimePublicKey,
+    pub manager_signature: SphincsSignature,
+}
+
+#[derive(Clone)]
+struct CertifiedKey {
+    key_pair: OneTimeKeyPair,
+    certificate: MemberCertificate,
+    used: bool,
+}
+
+/// member state after attaching certs
 #[derive(Clone)]
 pub struct MemberSK {
-    /// Shared master secret — needed to compute WOTS+ leaf at `index`.
-    pub sk_seed:      [u8; N],
-    /// Per-member PRF key for message randomness.
-    /// Each member has an independent `sk_prf` so their R values are
-    /// unlinkable across signatures.
-    pub sk_prf:       [u8; N],
-    /// Public seed (same for all members).
-    pub pk_seed:      [u8; N],
-    /// Pre-computed group root.
-    pub group_root:   [u8; N],
-    /// This member's leaf index within the top-level XMSS tree (0..2^HP).
-    pub member_index: u32,
+    pub member_id: u32,
+    certified_keys: Vec<CertifiedKey>,
 }
 
-/// The group public key.
-///
-/// Any verifier can verify a group signature using only this key.
-/// It is structurally identical to a SPHINCS+ public key.
+impl MemberSK {
+    pub fn remaining_signatures(&self) -> usize {
+        self.certified_keys.iter().filter(|key| !key.used).count()
+    }
+
+    pub fn total_certified_keys(&self) -> usize {
+        self.certified_keys.len()
+    }
+}
+
+/// manager-side record (for opening)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IssuedCertificateRecord {
+    pub certificate_id: u64,
+    pub member_id: u32,
+    pub key: OneTimePublicKey,
+}
+
+pub struct GroupManagerKey {
+    signing_key: SphincsSK,
+    next_certificate_id: u64,
+    issued_certificates: Vec<IssuedCertificateRecord>,
+}
+
+impl GroupManagerKey {
+    pub fn issued_certificates(&self) -> &[IssuedCertificateRecord] {
+        &self.issued_certificates
+    }
+}
+
 pub struct GroupPK {
-    pub pk_seed:    [u8; N],
-    pub group_root: [u8; N],
+    manager_pk: SphincsPK,
 }
 
 impl GroupPK {
-    /// Convert to the underlying SPHINCS+ public key for `slh_verify`.
-    pub fn as_sphincs_pk(&self) -> SphincsPK {
-        SphincsPK { pk_seed: self.pk_seed, pk_root: self.group_root }
+    pub fn as_sphincs_pk(&self) -> &SphincsPK {
+        &self.manager_pk
     }
 }
 
-// ── Digest helpers (reused from sphincs.rs logic) ─────────────────────────────
-
-fn split_digest(digest: &[u8; crate::params::M]) -> ([u8; MD_BYTES], u64, u64) {
-    let mut md = [0u8; MD_BYTES];
-    md.copy_from_slice(&digest[..MD_BYTES]);
-
-    let idx_tree = {
-        let mut buf = [0u8; 8];
-        let len = IDX_TREE_BYTES.min(8);
-        buf[8 - len..].copy_from_slice(&digest[MD_BYTES..MD_BYTES + len]);
-        u64::from_be_bytes(buf)
-    };
-    // Note: idx_leaf from digest is IGNORED for group signing (overridden by member_index)
-    let idx_leaf = {
-        let mut buf = [0u8; 8];
-        let len = IDX_LEAF_BYTES.min(8);
-        let start = MD_BYTES + IDX_TREE_BYTES;
-        buf[8 - len..].copy_from_slice(&digest[start..start + len]);
-        u64::from_be_bytes(buf)
-    };
-    (md, idx_tree, idx_leaf)
+/// final signature: cert + WOTS
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupSignature {
+    pub certificate: MemberCertificate,
+    pub wots_signature: WotsSig,
 }
 
-fn fors_adrs(idx_tree: u64, idx_leaf: u64) -> Adrs {
-    let mut adrs = Adrs::new(AdrsType::ForsTree);
+fn hash_message_for_wots(msg: &[u8]) -> [u8; N] {
+    // WOTS only signs N bytes, so compress first
+    let digest = Sha256::digest(msg);
+    let mut out = [0u8; N];
+    out.copy_from_slice(&digest[..N]);
+    out
+}
+
+fn wots_adrs(key_id: u32) -> Adrs {
+    // keep things simple: layer/tree fixed
+    let mut adrs = Adrs::new(AdrsType::Wots);
     adrs.set_layer_address(0);
-    adrs.set_tree_address(idx_tree);
-    adrs.set_keypair_address(idx_leaf as u32);
+    adrs.set_tree_address(0);
+    adrs.set_keypair_address(key_id);
     adrs
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+fn serialise_certificate_body(certificate_id: u64, key: &OneTimePublicKey) -> Vec<u8> {
+    // no member_id here (privacy)
+    let mut out =
+        Vec::with_capacity(CERT_DOMAIN_SEP.len() + 8 + 4 + N + N);
+    out.extend_from_slice(CERT_DOMAIN_SEP);
+    out.extend_from_slice(&certificate_id.to_be_bytes());
+    out.extend_from_slice(&key.key_id.to_be_bytes());
+    out.extend_from_slice(&key.pk_seed);
+    out.extend_from_slice(&key.wots_pk);
+    out
+}
 
-/// Generate a group key pair for up to `2^HP` members (FIPS 205 Alg. 18 variant).
-///
-/// The manager calls this once and distributes member keys via [`derive_member_key`].
+/// manager gen SPHINCS+ keypair for signing certs
 pub fn group_keygen<S: SphincsHasher>() -> (GroupManagerKey, GroupPK) {
-    let mut sk_seed = [0u8; N];
-    let mut pk_seed = [0u8; N];
-    OsRng.fill_bytes(&mut sk_seed);
-    OsRng.fill_bytes(&mut pk_seed);
-
-    // Compute group root = top-level XMSS tree root
-    let mut adrs = Adrs::new(AdrsType::TreeNode);
-    adrs.set_layer_address((D - 1) as u32);
-    adrs.set_tree_address(0);
-    let group_root = xmss::xmss_node_fast::<S>(&sk_seed, 0, HP, &pk_seed, adrs);
-
+    let (signing_key, manager_pk) = slh_keygen_fast::<S>();
     let manager = GroupManagerKey {
-        sk_seed,
-        pk_seed,
-        group_root,
-        max_members: 1 << HP,
+        signing_key,
+        next_certificate_id: 0,
+        issued_certificates: Vec::new(),
     };
-    let gpk = GroupPK { pk_seed, group_root };
+    let gpk = GroupPK { manager_pk };
     (manager, gpk)
 }
 
-/// Derive member `index`'s secret key from the manager key.
-///
-/// `index` must be in `0..manager.max_members`.
-/// Each member gets an independent `sk_prf` sampled freshly so their
-/// per-message randomness is unlinkable.
-pub fn derive_member_key(manager: &GroupManagerKey, index: u32) -> MemberSK {
-    assert!(
-        (index as usize) < manager.max_members,
-        "member index {index} exceeds max_members {}",
-        manager.max_members
-    );
-    let mut sk_prf = [0u8; N];
-    OsRng.fill_bytes(&mut sk_prf);
-
-    MemberSK {
-        sk_seed:      manager.sk_seed,
-        sk_prf,
-        pk_seed:      manager.pk_seed,
-        group_root:   manager.group_root,
-        member_index: index,
+/// member local gen a batch of one-time WOTS+ keys
+pub fn generate_member_key_batch<S: SphincsHasher>(
+    member_id: u32,
+    batch_size: usize,
+) -> Result<MemberKeyBatch, GroupError> {
+    if batch_size == 0 {
+        return Err(GroupError::EmptyBatch);
     }
+    if batch_size > u32::MAX as usize {
+        return Err(GroupError::BatchTooLarge);
+    }
+
+    let mut keys = Vec::with_capacity(batch_size);
+    for key_id in 0..batch_size {
+        // every WOTS keypair gets fresh seeds
+        let mut sk_seed = [0u8; N];
+        let mut pk_seed = [0u8; N];
+        OsRng.fill_bytes(&mut sk_seed);
+        OsRng.fill_bytes(&mut pk_seed);
+
+        let public_key = OneTimePublicKey {
+            key_id: key_id as u32,
+            pk_seed,
+            wots_pk: wots::wots_pk_gen::<S>(&sk_seed, &pk_seed, &wots_adrs(key_id as u32)),
+        };
+
+        keys.push(OneTimeKeyPair { sk_seed, public_key });
+    }
+
+    Ok(MemberKeyBatch { member_id, keys })
 }
 
-/// Sign a message as a group member (FIPS 205 Alg. 19 variant).
+/// manager signs every one-time public key in the batch
+pub fn certify_key_batch<S: SphincsHasher>(
+    manager: &mut GroupManagerKey,
+    request: &MemberCertificationRequest,
+) -> Result<Vec<MemberCertificate>, GroupError> {
+    if request.keys.is_empty() {
+        return Err(GroupError::EmptyBatch);
+    }
+
+    let mut certificates = Vec::with_capacity(request.keys.len());
+    for key in &request.keys {
+        let certificate_id = manager.next_certificate_id;
+        manager.next_certificate_id = manager
+            .next_certificate_id
+            .checked_add(1)
+            .expect("certificate id overflowed");
+
+        let certificate_body = serialise_certificate_body(certificate_id, key);
+        // manager signs only cert body, not member_id
+        let manager_signature = slh_sign_fast::<S>(&certificate_body, &manager.signing_key);
+
+        manager.issued_certificates.push(IssuedCertificateRecord {
+            certificate_id,
+            member_id: request.member_id,
+            key: *key,
+        });
+
+        certificates.push(MemberCertificate {
+            certificate_id,
+            key: *key,
+            manager_signature,
+        });
+    }
+
+    Ok(certificates)
+}
+
+/// Bind returned certs back to the member's private batch.
 ///
-/// # Key difference from `slh_sign`
-///
-/// In standard SPHINCS+, `idx_leaf` comes from the message digest.
-/// Here, `idx_leaf` is **forced to `member_index`**, so the member's
-/// WOTS+ leaf is always used, regardless of the message content.
-/// The `idx_tree` still comes from the digest for domain separation.
-///
-/// This means the FORS signature is computed for the same tree/leaf
-/// combination as in standard signing, but the HT signature always
-/// authenticates through the member's specific leaf.
-pub fn group_sign<S: SphincsHasher>(msg: &[u8], sk: &MemberSK) -> SphincsSignature {
-    let target_leaf = sk.member_index as u64;
-    let base_opt_rand = sk.pk_seed;
+/// We keep it simple here:
+/// `certificates` should stay in the same order as the request.
+pub fn attach_certificates(
+    batch: MemberKeyBatch,
+    certificates: Vec<MemberCertificate>,
+) -> Result<MemberSK, GroupError> {
+    if batch.keys.len() != certificates.len() {
+        return Err(GroupError::CertificateCountMismatch);
+    }
 
-    // Search for r such that idx_leaf_from_digest matches target_leaf.
-    // This requires calling prf_msg and h_msg repeatedly, so we optimize by:
-    // 1. Using early exit on first match
-    // 2. Parallel search when feature "parallel" is enabled
-    // 3. Fallback to standard r if not found (extremely rare in practice)
-
-    #[cfg(feature = "parallel")]
-    let found_r: Option<[u8; N]> = {
-        use rayon::prelude::*;
-        (0u8..=255u8)
-            .into_par_iter()
-            .find_map_any(|hi| {
-                (0u8..=255u8).find_map(|lo| {
-                    let mut opt_rand = base_opt_rand;
-                    opt_rand[N - 2] = hi;
-                    opt_rand[N - 1] = lo;
-                    let r_candidate = S::prf_msg(&sk.sk_prf, &opt_rand, msg);
-                    let digest = S::h_msg(&r_candidate, &sk.pk_seed, &sk.group_root, msg);
-                    let (_, _, idx_leaf_from_digest) = split_digest(&digest);
-                    if idx_leaf_from_digest == target_leaf {
-                        Some(r_candidate)
-                    } else {
-                        None
-                    }
-                })
-            })
-    };
-
-    #[cfg(not(feature = "parallel"))]
-    let found_r: Option<[u8; N]> = {
-        // Sequential scan: iterate until we find a match
-        let mut result = None;
-        'outer: for hi in 0u8..=255 {
-            for lo in 0u8..=255 {
-                let mut opt_rand = base_opt_rand;
-                opt_rand[N - 2] = hi;
-                opt_rand[N - 1] = lo;
-
-                let r_candidate = S::prf_msg(&sk.sk_prf, &opt_rand, msg);
-                let digest = S::h_msg(&r_candidate, &sk.pk_seed, &sk.group_root, msg);
-                let (_, _, idx_leaf_from_digest) = split_digest(&digest);
-
-                if idx_leaf_from_digest == target_leaf {
-                    result = Some(r_candidate);
-                    break 'outer;
-                }
-            }
+    let mut certified_keys = Vec::with_capacity(batch.keys.len());
+    for (key_pair, certificate) in batch.keys.into_iter().zip(certificates) {
+        if key_pair.public_key != certificate.key {
+            return Err(GroupError::CertificateMismatch);
         }
-        result
-    };
+        certified_keys.push(CertifiedKey {
+            key_pair,
+            certificate,
+            used: false,
+        });
+    }
 
-    // If no match found in search space (extremely rare), use standard r
-    let r = found_r.unwrap_or_else(|| S::prf_msg(&sk.sk_prf, &sk.pk_seed, msg));
-
-// Recompute digest and md/idx_tree from chosen r
-let digest = S::h_msg(&r, &sk.pk_seed, &sk.group_root, msg);
-let (md, idx_tree, _idx_leaf_from_digest) = split_digest(&digest);
-
-// Use the member-assigned leaf for FORS and HT (forced).
-let idx_leaf = sk.member_index as u64;
-
-// FORS signature using forced leaf ADRS
-let f_adrs   = fors_adrs(idx_tree, idx_leaf);
-let fors_sig = fors::fors_sign::<S>(&md, &sk.sk_seed, &sk.pk_seed, &f_adrs);
-let fors_pk  = fors::fors_pk_from_sig::<S>(&fors_sig, &md, &sk.pk_seed, &f_adrs);
-
-// HT signature authenticating through the member's leaf
-let ht_sig = ht::ht_sign_fast::<S>(&fors_pk, &sk.sk_seed, &sk.pk_seed, idx_tree, idx_leaf);
-
-SphincsSignature { r, fors_sig, ht_sig }
+    Ok(MemberSK {
+        member_id: batch.member_id,
+        certified_keys,
+    })
 }
 
-/// Verify a group signature (standard `slh_verify` under the group public key).
+pub fn certify_member_batch<S: SphincsHasher>(
+    manager: &mut GroupManagerKey,
+    batch: MemberKeyBatch,
+) -> Result<MemberSK, GroupError> {
+    let request = batch.certification_request();
+    let certificates = certify_key_batch::<S>(manager, &request)?;
+    attach_certificates(batch, certificates)
+}
+
+/// sign with a specific certified one-time key
 ///
-/// Returns `true` iff the signature is valid under `gpk`.
-/// Does NOT reveal which member signed.
+/// if caller wants to manually pick "which unused key", use this one
+pub fn group_sign_with_key_index<S: SphincsHasher>(
+    msg: &[u8],
+    member: &mut MemberSK,
+    key_index: usize,
+) -> Result<GroupSignature, GroupError> {
+    let certified_key = member
+        .certified_keys
+        .get_mut(key_index)
+        .ok_or(GroupError::CertifiedKeyUnavailable)?;
+
+    if certified_key.used {
+        return Err(GroupError::CertifiedKeyUnavailable);
+    }
+
+    // WOTS is one-time, so once we sign, this slot is considered burned
+    let msg_digest = hash_message_for_wots(msg);
+    let wots_signature = wots::wots_sign::<S>(
+        &msg_digest,
+        &certified_key.key_pair.sk_seed,
+        &certified_key.key_pair.public_key.pk_seed,
+        &wots_adrs(certified_key.key_pair.public_key.key_id),
+    );
+
+    certified_key.used = true;
+
+    Ok(GroupSignature {
+        certificate: certified_key.certificate.clone(),
+        wots_signature,
+    })
+}
+
+/// sign with the first unused certified one-time key
+pub fn group_sign<S: SphincsHasher>(
+    msg: &[u8],
+    member: &mut MemberSK,
+) -> Result<GroupSignature, GroupError> {
+    let Some(key_index) = member.certified_keys.iter().position(|key| !key.used) else {
+        return Err(GroupError::NoUnusedCertifiedKey);
+    };
+
+    group_sign_with_key_index::<S>(msg, member, key_index)
+}
+
+/// verify both layers:
+/// 1. manager cert
+/// 2. WOTS sig under the certified one-time public key
 pub fn group_verify<S: SphincsHasher>(
     msg: &[u8],
-    sig: &SphincsSignature,
+    signature: &GroupSignature,
     gpk: &GroupPK,
 ) -> bool {
-    slh_verify::<S>(msg, sig, &gpk.as_sphincs_pk())
+    let certificate_body =
+        serialise_certificate_body(signature.certificate.certificate_id, &signature.certificate.key);
+    if !slh_verify::<S>(
+        &certificate_body,
+        &signature.certificate.manager_signature,
+        gpk.as_sphincs_pk(),
+    ) {
+        return false;
+    }
+
+    let msg_digest = hash_message_for_wots(msg);
+    let recovered_pk = wots::wots_pk_from_sig::<S>(
+        &signature.wots_signature,
+        &msg_digest,
+        &signature.certificate.key.pk_seed,
+        &wots_adrs(signature.certificate.key.key_id),
+    );
+
+    recovered_pk == signature.certificate.key.wots_pk
 }
 
-/// Verify a group signature from raw bytes.
+/// serialize group sig to raw bytes
+pub fn serialise_group_sig(signature: &GroupSignature) -> Vec<u8> {
+    let mut out = Vec::with_capacity(GROUP_SIGNATURE_BYTES);
+    out.push(GROUP_SIG_VERSION);
+    out.extend_from_slice(&signature.certificate.certificate_id.to_be_bytes());
+    out.extend_from_slice(&signature.certificate.key.key_id.to_be_bytes());
+    out.extend_from_slice(&signature.certificate.key.pk_seed);
+    out.extend_from_slice(&signature.certificate.key.wots_pk);
+    out.extend_from_slice(&serialise_sig(&signature.certificate.manager_signature));
+    for element in &signature.wots_signature {
+        out.extend_from_slice(element);
+    }
+    debug_assert_eq!(out.len(), GROUP_SIGNATURE_BYTES);
+    out
+}
+
+/// parse raw bytes back into a group sig
+pub fn deserialise_group_sig(bytes: &[u8]) -> Option<GroupSignature> {
+    if bytes.len() != GROUP_SIGNATURE_BYTES || bytes.first().copied()? != GROUP_SIG_VERSION {
+        return None;
+    }
+
+    let mut pos = 1usize;
+    let read_u64 = |bytes: &[u8], pos: &mut usize| -> u64 {
+        let mut out = [0u8; 8];
+        out.copy_from_slice(&bytes[*pos..*pos + 8]);
+        *pos += 8;
+        u64::from_be_bytes(out)
+    };
+    let read_u32 = |bytes: &[u8], pos: &mut usize| -> u32 {
+        let mut out = [0u8; 4];
+        out.copy_from_slice(&bytes[*pos..*pos + 4]);
+        *pos += 4;
+        u32::from_be_bytes(out)
+    };
+    let read_n = |bytes: &[u8], pos: &mut usize| -> [u8; N] {
+        let mut out = [0u8; N];
+        out.copy_from_slice(&bytes[*pos..*pos + N]);
+        *pos += N;
+        out
+    };
+
+    let certificate_id = read_u64(bytes, &mut pos);
+    let key_id = read_u32(bytes, &mut pos);
+    let pk_seed = read_n(bytes, &mut pos);
+    let wots_pk = read_n(bytes, &mut pos);
+
+    let manager_signature = deserialise_sig(&bytes[pos..pos + SIG_BYTES])?;
+    pos += SIG_BYTES;
+
+    let mut wots_signature = [[0u8; N]; WOTS_LEN];
+    for element in &mut wots_signature {
+        *element = read_n(bytes, &mut pos);
+    }
+
+    Some(GroupSignature {
+        certificate: MemberCertificate {
+            certificate_id,
+            key: OneTimePublicKey {
+                key_id,
+                pk_seed,
+                wots_pk,
+            },
+            manager_signature,
+        },
+        wots_signature,
+    })
+}
+
+/// verify directly from raw bytes
 pub fn group_verify_raw<S: SphincsHasher>(
     msg: &[u8],
     sig_bytes: &[u8],
     gpk: &GroupPK,
 ) -> bool {
-    match deserialise_sig(sig_bytes) {
-        Some(sig) => group_verify::<S>(msg, &sig, gpk),
-        None      => false,
+    match deserialise_group_sig(sig_bytes) {
+        Some(signature) => group_verify::<S>(msg, &signature, gpk),
+        None => false,
     }
 }
 
-/// Attempt to identify which member produced a signature (manager only).
-///
-/// The manager uses `sk_seed` to recompute the WOTS+ public key for each
-/// candidate member leaf and checks it against the signature's authentication
-/// path. Returns `Some(member_index)` if a matching member is found.
-///
-/// # Complexity
-/// O(M × WOTS+ key generation) where M = number of members.
-/// For M ≤ 256 (HP=8) this is practical; for larger groups, the manager
-/// should use the authentication path structure to narrow the search.
-///
-/// # Note on anonymity
-/// An external verifier who does NOT have `sk_seed` cannot efficiently
-/// perform this check, so anonymity holds against non-manager adversaries.
-pub fn group_identify_member<S: SphincsHasher>(
-    msg: &[u8],
-    sig: &SphincsSignature,
+/// manager-only open
+/// basically just use cert id + key info to look up who got this cert before
+pub fn group_open_signature(
+    signature: &GroupSignature,
     manager: &GroupManagerKey,
 ) -> Option<u32> {
-    // Recover what leaf index the signer used, by re-running the digest split
-    let digest   = S::h_msg(&sig.r, &manager.pk_seed, &manager.group_root, msg);
-    let (md, idx_tree, _) = split_digest(&digest);
-
-    // Try each candidate member leaf
-    for candidate in 0..(manager.max_members as u32) {
-        let idx_leaf = candidate as u64;
-
-        // Recover FORS PK for this candidate
-        let f_adrs  = fors_adrs(idx_tree, idx_leaf);
-        let fors_pk = fors::fors_pk_from_sig::<S>(
-            &sig.fors_sig, &md, &manager.pk_seed, &f_adrs,
-        );
-
-        // Verify HT path from this candidate leaf to the group root
-        if ht::ht_verify::<S>(
-            &fors_pk, &sig.ht_sig, &manager.pk_seed,
-            idx_tree, idx_leaf, &manager.group_root,
-        ) {
-            return Some(candidate);
-        }
-    }
-    None
+    manager
+        .issued_certificates
+        .iter()
+        .find(|record| {
+            record.certificate_id == signature.certificate.certificate_id
+                && record.key == signature.certificate.key
+        })
+        .map(|record| record.member_id)
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+/// same idea as open, just another name
+pub fn group_identify_member(
+    signature: &GroupSignature,
+    manager: &GroupManagerKey,
+) -> Option<u32> {
+    group_open_signature(signature, manager)
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hash::RawSha256;
-    use crate::sphincs::{serialise_sig, SIG_BYTES};
 
-    /// Full group signature round-trip: keygen → member keys → sign → verify.
     #[test]
-    fn group_sign_verify_roundtrip() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msg = b"UNSW 26T1 Applied Cryptography group sig test";
+    fn certificate_flow_roundtrip() {
+        let (mut manager, gpk) = group_keygen::<RawSha256>();
+        let batch = generate_member_key_batch::<RawSha256>(7, 4).unwrap();
+        let request = batch.certification_request();
+        let certificates = certify_key_batch::<RawSha256>(&mut manager, &request).unwrap();
+        let mut member = attach_certificates(batch, certificates).unwrap();
 
-        // Try multiple member indices
-        for idx in [0u32, 1, 7, (1 << HP) - 1] {
-            let msk = derive_member_key(&manager, idx);
-            let sig = group_sign::<RawSha256>(msg, &msk);
-            assert!(
-                group_verify::<RawSha256>(msg, &sig, &gpk),
-                "group_verify failed for member {idx}"
-            );
-        }
+        let msg = b"certificate-based group signature";
+        let signature = group_sign::<RawSha256>(msg, &mut member).unwrap();
+
+        assert!(group_verify::<RawSha256>(msg, &signature, &gpk));
+        assert_eq!(group_open_signature(&signature, &manager), Some(7));
+        assert_eq!(member.remaining_signatures(), 3);
     }
 
-    /// Wrong message must not verify.
     #[test]
-    fn group_wrong_message_fails() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 0);
-        let sig = group_sign::<RawSha256>(b"correct", &msk);
-        assert!(!group_verify::<RawSha256>(b"wrong", &sig, &gpk));
+    fn signing_consumes_unused_keys() {
+        let (mut manager, gpk) = group_keygen::<RawSha256>();
+        let batch = generate_member_key_batch::<RawSha256>(3, 2).unwrap();
+        let mut member = certify_member_batch::<RawSha256>(&mut manager, batch).unwrap();
+
+        let sig0 = group_sign::<RawSha256>(b"first", &mut member).unwrap();
+        let sig1 = group_sign::<RawSha256>(b"second", &mut member).unwrap();
+
+        assert!(group_verify::<RawSha256>(b"first", &sig0, &gpk));
+        assert!(group_verify::<RawSha256>(b"second", &sig1, &gpk));
+        assert_eq!(member.remaining_signatures(), 0);
+        assert_eq!(
+            group_sign::<RawSha256>(b"third", &mut member),
+            Err(GroupError::NoUnusedCertifiedKey)
+        );
     }
 
-    /// Different group (different group_root) must not verify a signature.
     #[test]
-    fn group_cross_group_fails() {
-        let (manager1, gpk1) = group_keygen::<RawSha256>();
-        let (_manager2, gpk2) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager1, 0);
-        let msg = b"cross group test";
-        let sig = group_sign::<RawSha256>(msg, &msk);
-        assert!( group_verify::<RawSha256>(msg, &sig, &gpk1), "valid sig rejected under own group");
-        assert!(!group_verify::<RawSha256>(msg, &sig, &gpk2), "sig accepted under different group");
+    fn signing_specific_key_index_works() {
+        let (mut manager, gpk) = group_keygen::<RawSha256>();
+        let batch = generate_member_key_batch::<RawSha256>(11, 3).unwrap();
+        let mut member = certify_member_batch::<RawSha256>(&mut manager, batch).unwrap();
+
+        let signature = group_sign_with_key_index::<RawSha256>(b"indexed", &mut member, 2).unwrap();
+
+        assert!(group_verify::<RawSha256>(b"indexed", &signature, &gpk));
+        assert_eq!(
+            group_sign_with_key_index::<RawSha256>(b"reuse", &mut member, 2),
+            Err(GroupError::CertifiedKeyUnavailable)
+        );
+        assert_eq!(member.remaining_signatures(), 2);
     }
 
-    /// group_sign + serialise + group_verify_raw round-trip.
     #[test]
-    fn group_raw_roundtrip() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 3);
-        let msg = b"raw group sig test";
-        let sig      = group_sign::<RawSha256>(msg, &msk);
-        let sig_bytes = serialise_sig(&sig);
-        assert_eq!(sig_bytes.len(), SIG_BYTES);
-        assert!(group_verify_raw::<RawSha256>(msg, &sig_bytes, &gpk));
+    fn wrong_message_fails() {
+        let (mut manager, gpk) = group_keygen::<RawSha256>();
+        let batch = generate_member_key_batch::<RawSha256>(1, 1).unwrap();
+        let mut member = certify_member_batch::<RawSha256>(&mut manager, batch).unwrap();
+
+        let signature = group_sign::<RawSha256>(b"correct", &mut member).unwrap();
+        assert!(!group_verify::<RawSha256>(b"wrong", &signature, &gpk));
     }
 
-    /// Manager can identify which member signed.
     #[test]
-    fn group_identify_correct_member() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msg = b"identify me";
+    fn tampered_certificate_fails() {
+        let (mut manager, gpk) = group_keygen::<RawSha256>();
+        let batch = generate_member_key_batch::<RawSha256>(5, 1).unwrap();
+        let mut member = certify_member_batch::<RawSha256>(&mut manager, batch).unwrap();
 
-        for expected_idx in [0u32, 1, 5] {
-            let msk = derive_member_key(&manager, expected_idx);
-            let sig = group_sign::<RawSha256>(msg, &msk);
-            let found = group_identify_member::<RawSha256>(msg, &sig, &manager);
-            assert_eq!(
-                found, Some(expected_idx),
-                "manager identified wrong member: got {found:?}, expected Some({expected_idx})"
-            );
-        }
+        let signature = group_sign::<RawSha256>(b"hello", &mut member).unwrap();
+        let mut tampered = signature.clone();
+        tampered.certificate.key.wots_pk[0] ^= 0x01;
+
+        assert!(!group_verify::<RawSha256>(b"hello", &tampered, &gpk));
     }
 
-    /// Verifier cannot distinguish which member signed (anonymity smoke test).
-    ///
-    /// This test checks that signatures from different members are
-    /// structurally indistinguishable to the verifier: both verify correctly
-    /// under the group PK, and neither signature reveals the leaf index
-    /// in any directly accessible field.
     #[test]
-    fn group_signatures_are_anonymous() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msg  = b"anonymous message";
-        let msk0 = derive_member_key(&manager, 0);
-        let msk1 = derive_member_key(&manager, 1);
+    fn raw_roundtrip_works() {
+        let (mut manager, gpk) = group_keygen::<RawSha256>();
+        let batch = generate_member_key_batch::<RawSha256>(9, 2).unwrap();
+        let mut member = certify_member_batch::<RawSha256>(&mut manager, batch).unwrap();
 
-        let sig0 = group_sign::<RawSha256>(msg, &msk0);
-        let sig1 = group_sign::<RawSha256>(msg, &msk1);
+        let signature = group_sign::<RawSha256>(b"raw", &mut member).unwrap();
+        let raw = serialise_group_sig(&signature);
 
-        // Both verify correctly
-        assert!(group_verify::<RawSha256>(msg, &sig0, &gpk), "sig0 should verify");
-        assert!(group_verify::<RawSha256>(msg, &sig1, &gpk), "sig1 should verify");
-
-        // The verifier cannot tell which member signed (signatures look the same to it)
-        // We assert they differ at least structurally (different leaves → different sigs)
-        let bytes0 = serialise_sig(&sig0);
-        let bytes1 = serialise_sig(&sig1);
-        assert_ne!(bytes0, bytes1, "signatures from different members should differ");
+        assert_eq!(raw.len(), GROUP_SIGNATURE_BYTES);
+        assert!(group_verify_raw::<RawSha256>(b"raw", &raw, &gpk));
     }
 
-    /// Two signatures from the same member on different messages both verify.
     #[test]
-    fn group_member_can_sign_multiple_messages() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 2);
+    fn attach_rejects_mismatched_certificates() {
+        let (mut manager, _gpk) = group_keygen::<RawSha256>();
+        let batch = generate_member_key_batch::<RawSha256>(13, 2).unwrap();
+        let request = batch.certification_request();
+        let mut certificates = certify_key_batch::<RawSha256>(&mut manager, &request).unwrap();
+        certificates.swap(0, 1);
 
-        let msgs: &[&[u8]] = &[b"msg one", b"msg two", b"msg three"];
-        for msg in msgs {
-            let sig = group_sign::<RawSha256>(msg, &msk);
-            assert!(group_verify::<RawSha256>(msg, &sig, &gpk),
-                "member 2 failed to verify for: {}", String::from_utf8_lossy(msg));
-        }
+        assert!(matches!(
+            attach_certificates(batch, certificates),
+            Err(GroupError::CertificateMismatch)
+        ));
+    }
+
+    #[test]
+    fn identify_member_returns_none_for_unknown_certificate() {
+        let (mut manager_a, _gpk_a) = group_keygen::<RawSha256>();
+        let (mut manager_b, _gpk_b) = group_keygen::<RawSha256>();
+
+        let batch = generate_member_key_batch::<RawSha256>(21, 1).unwrap();
+        let mut member = certify_member_batch::<RawSha256>(&mut manager_a, batch).unwrap();
+        let signature = group_sign::<RawSha256>(b"open", &mut member).unwrap();
+
+        assert_eq!(group_identify_member(&signature, &manager_a), Some(21));
+        assert_eq!(group_identify_member(&signature, &manager_b), None);
+
+        let other_batch = generate_member_key_batch::<RawSha256>(22, 1).unwrap();
+        let _ = certify_member_batch::<RawSha256>(&mut manager_b, other_batch).unwrap();
     }
 }

@@ -42,6 +42,7 @@ use crate::params::{A, K, MD_BYTES, N, T};
 pub type ForsAuth = [[u8; N]; A];
 
 /// FORS signature element for a single tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForsTreeSig {
     /// The revealed FORS secret key leaf (= `PRF(pk_seed, sk_seed, ADRS)`).
     pub sk: [u8; N],
@@ -50,6 +51,7 @@ pub struct ForsTreeSig {
 }
 
 /// Full FORS signature: K independent tree signatures.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForsSig {
     /// One [`ForsTreeSig`] per FORS tree (length K).
     pub trees: Vec<ForsTreeSig>,
