@@ -86,13 +86,14 @@
 //! trade-off note:
 //! fast version uses more memory, but much less redundant computation
 
+pub mod adrs;
+pub mod digest;
+pub mod fors;
+pub mod group;
+pub mod hash;
+pub mod ht;
 pub mod params;
 pub mod params_alpha;
-pub mod adrs;
-pub mod hash;
+pub mod sphincs;
 pub mod wots;
 pub mod xmss;
-pub mod fors;
-pub mod ht;
-pub mod sphincs;
-pub mod group;

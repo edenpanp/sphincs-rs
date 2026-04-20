@@ -4,7 +4,7 @@
 //! nothing fancy, just split things correctly
 
 use crate::adrs::{Adrs, AdrsType};
-use crate::params::{IDX_LEAF_BYTES, IDX_TREE_BYTES, MD_BYTES, M};
+use crate::params::{IDX_LEAF_BYTES, IDX_TREE_BYTES, M, MD_BYTES};
 
 /// split digest -> (md, tree, leaf)
 ///

@@ -56,9 +56,13 @@ pub fn xmss_node<S: SphincsHasher>(
     if z == 0 {
         return compute_leaf::<S>(sk_seed, pk_seed, i, &adrs);
     }
+<<<<<<< HEAD
 
     // recursively compute children
     let left  = xmss_node::<S>(sk_seed, 2 * i,     z - 1, pk_seed, adrs);
+=======
+    let left = xmss_node::<S>(sk_seed, 2 * i, z - 1, pk_seed, adrs);
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b
     let right = xmss_node::<S>(sk_seed, 2 * i + 1, z - 1, pk_seed, adrs);
 
     let mut node_adrs = adrs;
@@ -124,14 +128,22 @@ fn build_tree<S: SphincsHasher>(
     // build upper layers
     for z in 1..=HP {
         let prev = &tree[z - 1];
+<<<<<<< HEAD
         let mut layer = Vec::with_capacity(prev.len() / 2);
+=======
+        let width = prev.len() / 2;
+        let mut layer = Vec::with_capacity(width);
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b
 
         for i in 0..(prev.len() / 2) {
             let mut node_adrs = adrs;
             node_adrs.set_type_and_clear(AdrsType::TreeNode);
             node_adrs.set_tree_height(z as u32);
             node_adrs.set_tree_index(i as u32);
+<<<<<<< HEAD
 
+=======
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b
             layer.push(S::h_two(
                 pk_seed,
                 &node_adrs,
@@ -222,4 +234,78 @@ pub fn xmss_pk_from_sig<S: SphincsHasher>(
     }
 
     node
+<<<<<<< HEAD
 }
+=======
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hash::RawSha256;
+    use rand::{RngCore, rngs::OsRng};
+
+    fn rng_n() -> [u8; N] {
+        let mut b = [0u8; N];
+        OsRng.fill_bytes(&mut b);
+        b
+    }
+
+    /// Baseline and fast strategies must produce the same root.
+    #[test]
+    fn xmss_fast_root_matches_baseline() {
+        let (sk, pk, msg) = (rng_n(), rng_n(), rng_n());
+        let adrs = Adrs::new(AdrsType::TreeNode);
+
+        let root_baseline = xmss_node::<RawSha256>(&sk, 0, HP, &pk, adrs);
+        let root_fast = xmss_node_fast::<RawSha256>(&sk, 0, HP, &pk, adrs);
+        assert_eq!(root_baseline, root_fast, "roots must agree");
+    }
+
+    /// Fast sign + shared verify must succeed for multiple leaves.
+    #[test]
+    fn xmss_fast_sign_verify_roundtrip() {
+        let (sk, pk, msg) = (rng_n(), rng_n(), rng_n());
+        let adrs = Adrs::new(AdrsType::TreeNode);
+        let root = xmss_node_fast::<RawSha256>(&sk, 0, HP, &pk, adrs);
+
+        for idx in [0, 1, (1 << HP) - 2, (1 << HP) - 1] {
+            let sig = xmss_sign_fast::<RawSha256>(&msg, &sk, idx, &pk, adrs);
+            let recovered = xmss_pk_from_sig::<RawSha256>(idx, &sig, &msg, &pk, adrs);
+            assert_eq!(root, recovered, "fast sign failed for idx={idx}");
+        }
+    }
+
+    /// Baseline and fast sign must produce the same authentication paths.
+    #[test]
+    fn xmss_fast_and_baseline_auth_paths_equal() {
+        let (sk, pk, msg) = (rng_n(), rng_n(), rng_n());
+        let adrs = Adrs::new(AdrsType::TreeNode);
+        let idx = 7usize;
+
+        let sig_base = xmss_sign::<RawSha256>(&msg, &sk, idx, &pk, adrs);
+        let sig_fast = xmss_sign_fast::<RawSha256>(&msg, &sk, idx, &pk, adrs);
+        assert_eq!(sig_base.auth, sig_fast.auth, "auth paths must agree");
+        assert_eq!(
+            sig_base.sig_wots, sig_fast.sig_wots,
+            "WOTS+ sigs must agree"
+        );
+    }
+
+    /// Baseline round-trip (kept for regression).
+    #[test]
+    fn xmss_baseline_roundtrip() {
+        let (sk, pk, msg) = (rng_n(), rng_n(), rng_n());
+        let adrs = Adrs::new(AdrsType::TreeNode);
+        let root = xmss_node::<RawSha256>(&sk, 0, HP, &pk, adrs);
+
+        for idx in [0, 3, (1 << HP) - 1] {
+            let sig = xmss_sign::<RawSha256>(&msg, &sk, idx, &pk, adrs);
+            let recovered = xmss_pk_from_sig::<RawSha256>(idx, &sig, &msg, &pk, adrs);
+            assert_eq!(root, recovered);
+        }
+    }
+}
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b

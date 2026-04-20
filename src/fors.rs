@@ -80,7 +80,7 @@ fn decode_indices(md: &[u8; MD_BYTES]) -> [usize; K] {
         let mut val = 0usize;
         for _ in 0..A {
             let byte_pos = bit_ptr / 8;
-            let bit_pos  = 7 - (bit_ptr % 8); // MSB-first within each byte
+            let bit_pos = 7 - (bit_ptr % 8); // MSB-first within each byte
             val = (val << 1) | (((md[byte_pos] >> bit_pos) & 1) as usize);
             bit_ptr += 1;
         }
@@ -149,7 +149,7 @@ pub fn fors_node<S: SphincsHasher>(
         return S::f(pk_seed, &leaf_adrs, &sk);
     }
 
-    let left  = fors_node::<S>(sk_seed, 2 * i,     z - 1, pk_seed, adrs);
+    let left = fors_node::<S>(sk_seed, 2 * i, z - 1, pk_seed, adrs);
     let right = fors_node::<S>(sk_seed, 2 * i + 1, z - 1, pk_seed, adrs);
 
     let mut node_adrs = *adrs;
@@ -182,7 +182,7 @@ pub fn fors_sign<S: SphincsHasher>(
     let mut trees = Vec::with_capacity(K);
 
     for j in 0..K {
-        let idx_j    = indices[j];
+        let idx_j = indices[j];
         let abs_leaf = j * T + idx_j; // absolute leaf in the K·T forest
 
         // Reveal the secret key leaf
@@ -219,7 +219,7 @@ pub fn fors_pk_from_sig<S: SphincsHasher>(
     let mut roots = [[0u8; N]; K];
 
     for j in 0..K {
-        let idx_j    = indices[j];
+        let idx_j = indices[j];
         let abs_leaf = j * T + idx_j;
         let tree_sig = &sig.trees[j];
 
@@ -354,15 +354,15 @@ mod tests {
     #[test]
     fn fors_wrong_digest_fails() {
         let (sk_seed, pk_seed) = (random_n(), random_n());
-        let md    = random_md();
+        let md = random_md();
         let wrong = random_md();
 
         let mut adrs = Adrs::new(AdrsType::ForsTree);
         adrs.set_keypair_address(0);
 
-        let sig          = fors_sign::<RawSha256>(&md, &sk_seed, &pk_seed, &adrs);
-        let pk_correct   = fors_pk_from_sig::<RawSha256>(&sig, &md, &pk_seed, &adrs);
-        let pk_wrong     = fors_pk_from_sig::<RawSha256>(&sig, &wrong, &pk_seed, &adrs);
+        let sig = fors_sign::<RawSha256>(&md, &sk_seed, &pk_seed, &adrs);
+        let pk_correct = fors_pk_from_sig::<RawSha256>(&sig, &md, &pk_seed, &adrs);
+        let pk_wrong = fors_pk_from_sig::<RawSha256>(&sig, &wrong, &pk_seed, &adrs);
 
         assert_ne!(pk_correct, pk_wrong, "FORS accepted wrong digest");
     }

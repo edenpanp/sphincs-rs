@@ -71,16 +71,16 @@ pub trait ParamSet {
     // ── Derived constants ──────────────────────────────────────────────────
 
     /// Height per XMSS layer H' = H / D.
-    const HP: usize  = Self::H / Self::D;
+    const HP: usize = Self::H / Self::D;
 
     /// log₂(W).
     const LOG_W: usize = match Self::W {
-        2  => 1,
-        4  => 2,
-        8  => 3,
+        2 => 1,
+        4 => 2,
+        8 => 3,
         16 => 4,
         32 => 5,
-        _  => panic!("W must be a power of two in [2, 32]"),
+        _ => panic!("W must be a power of two in [2, 32]"),
     };
 
     /// WOTS+ len₁ = ⌈8N / log₂(W)⌉.
@@ -96,11 +96,15 @@ pub trait ParamSet {
 
     /// Size of the FORS portion of the signature in bytes.
     /// `K × (1 + A) × N`
-    fn fors_sig_bytes() -> usize { Self::K * (1 + Self::A) * Self::N }
+    fn fors_sig_bytes() -> usize {
+        Self::K * (1 + Self::A) * Self::N
+    }
 
     /// Size of the HT portion of the signature in bytes.
     /// `D × (WOTS_LEN + HP) × N`
-    fn ht_sig_bytes() -> usize { Self::D * (Self::WOTS_LEN + Self::HP) * Self::N }
+    fn ht_sig_bytes() -> usize {
+        Self::D * (Self::WOTS_LEN + Self::HP) * Self::N
+    }
 
     /// Total signature size in bytes: N + FORS_bytes + HT_bytes.
     fn total_sig_bytes() -> usize {
@@ -111,8 +115,8 @@ pub trait ParamSet {
     /// Lower bound from the SPHINCS-alpha paper (Theorem 1):
     /// `K × A − log₂(K × T × H / D)`  where T = 2^A.
     fn fors_security_bits() -> f64 {
-        let ka  = (Self::K * Self::A) as f64;
-        let t   = (1usize << Self::A) as f64;
+        let ka = (Self::K * Self::A) as f64;
+        let t = (1usize << Self::A) as f64;
         let penalty = ((Self::K as f64) * t * (Self::H as f64) / (Self::D as f64)).log2();
         ka - penalty
     }
@@ -122,17 +126,17 @@ pub trait ParamSet {
         println!(
             "{name:25}  N={N}  H={H}  D={D}  HP={HP}  W={W}  K={K}  A={A}  \
              WOTS_LEN={WL}  fors={fs}B  ht={hs}B  total={ts}B  fors_sec≈{sec:.1}b",
-            N   = Self::N,
-            H   = Self::H,
-            D   = Self::D,
-            HP  = Self::HP,
-            W   = Self::W,
-            K   = Self::K,
-            A   = Self::A,
-            WL  = Self::WOTS_LEN,
-            fs  = Self::fors_sig_bytes(),
-            hs  = Self::ht_sig_bytes(),
-            ts  = Self::total_sig_bytes(),
+            N = Self::N,
+            H = Self::H,
+            D = Self::D,
+            HP = Self::HP,
+            W = Self::W,
+            K = Self::K,
+            A = Self::A,
+            WL = Self::WOTS_LEN,
+            fs = Self::fors_sig_bytes(),
+            hs = Self::ht_sig_bytes(),
+            ts = Self::total_sig_bytes(),
             sec = Self::fors_security_bits(),
         );
     }
@@ -164,8 +168,8 @@ impl ParamSet for Alpha128sSmall {
     const H: usize = 64;
     const D: usize = 8;
     const W: usize = 16;
-    const K: usize = 14;  // ← fewer trees
-    const A: usize = 17;  // ← deeper trees
+    const K: usize = 14; // ← fewer trees
+    const A: usize = 17; // ← deeper trees
 }
 
 /// SPHINCS-alpha-128s-fast: more, shallower FORS trees.
@@ -179,8 +183,8 @@ impl ParamSet for Alpha128sFast {
     const H: usize = 64;
     const D: usize = 8;
     const W: usize = 16;
-    const K: usize = 35;  // ← more trees
-    const A: usize = 9;   // ← shallower trees
+    const K: usize = 35; // ← more trees
+    const A: usize = 9; // ← shallower trees
 }
 
 // ── Comparison helper ─────────────────────────────────────────────────────────
@@ -190,10 +194,22 @@ pub fn print_comparison() {
     println!("\n{:=<80}", "");
     println!("SPHINCS-alpha parameter set comparison  (eprint 2022/059)");
     println!("{:=<80}", "");
-    println!("{:25}  {:>4}  {:>3}  {:>3}  {:>3}  {:>3}  {:>3}  {:>3}  \
+    println!(
+        "{:25}  {:>4}  {:>3}  {:>3}  {:>3}  {:>3}  {:>3}  {:>3}  \
               {:>9}  {:>9}  {:>9}  {:>9}",
-             "variant", "N", "H", "D", "W", "K", "A", "len",
-             "FORS (B)", "HT (B)", "total (B)", "fors_sec");
+        "variant",
+        "N",
+        "H",
+        "D",
+        "W",
+        "K",
+        "A",
+        "len",
+        "FORS (B)",
+        "HT (B)",
+        "total (B)",
+        "fors_sec"
+    );
     println!("{:-<80}", "");
     Sha2_256s::describe("SHA2-256s (standard)");
     Alpha128sSmall::describe("Alpha-128s-small");
@@ -210,8 +226,11 @@ mod tests {
     #[test]
     fn standard_sig_bytes_matches_code() {
         // The main sphincs.rs SIG_BYTES constant must agree with the formula.
-        assert_eq!(Sha2_256s::total_sig_bytes(), crate::sphincs::SIG_BYTES,
-            "ParamSet formula must match hard-coded SIG_BYTES");
+        assert_eq!(
+            Sha2_256s::total_sig_bytes(),
+            crate::sphincs::SIG_BYTES,
+            "ParamSet formula must match hard-coded SIG_BYTES"
+        );
         assert_eq!(Sha2_256s::total_sig_bytes(), 29792);
     }
 
@@ -235,14 +254,18 @@ mod tests {
 
     #[test]
     fn all_sets_have_positive_security() {
-        assert!(Sha2_256s::fors_security_bits()     > 0.0);
+        assert!(Sha2_256s::fors_security_bits() > 0.0);
         assert!(Alpha128sSmall::fors_security_bits() > 0.0);
-        assert!(Alpha128sFast::fors_security_bits()  > 0.0);
+        assert!(Alpha128sFast::fors_security_bits() > 0.0);
     }
 
     #[test]
     fn wots_len_correct_for_standard() {
-        assert_eq!(Sha2_256s::WOTS_LEN, 67, "WOTS_LEN must be 67 for N=32, W=16");
+        assert_eq!(
+            Sha2_256s::WOTS_LEN,
+            67,
+            "WOTS_LEN must be 67 for N=32, W=16"
+        );
     }
 
     #[test]

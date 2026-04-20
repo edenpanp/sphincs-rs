@@ -1,6 +1,14 @@
+<<<<<<< HEAD
 target/
 .vs/
 *.db
 *.sqlite
 *.bin
 *.json
+=======
+/target/
+/.ln
+
+# macOS finder metadata
+.DS_Store
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b

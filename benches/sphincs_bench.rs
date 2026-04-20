@@ -21,7 +21,7 @@
 //! - fors_sign: FORS signing cost
 //! - alpha_comparison: just prints parameter stats
 
-use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use rand::{RngCore, rngs::OsRng};
 
 use sphincs_rs::adrs::{Adrs, AdrsType};
@@ -48,9 +48,24 @@ fn bench_keygen(c: &mut Criterion) {
     g.bench_function("baseline/RawSha256", |b| b.iter(|| slh_keygen::<RawSha256>()));
     g.bench_function("fast/RawSha256",     |b| b.iter(|| slh_keygen_fast::<RawSha256>()));
 
+<<<<<<< HEAD
     g.bench_function("baseline/Sha256Hasher", |b| b.iter(|| slh_keygen::<Sha256Hasher>()));
     g.bench_function("fast/Sha256Hasher",     |b| b.iter(|| slh_keygen_fast::<Sha256Hasher>()));
 
+=======
+    g.bench_function("baseline/RawSha256", |b| {
+        b.iter(|| slh_keygen::<RawSha256>())
+    });
+    g.bench_function("fast/RawSha256", |b| {
+        b.iter(|| slh_keygen_fast::<RawSha256>())
+    });
+    g.bench_function("baseline/Sha256Hasher", |b| {
+        b.iter(|| slh_keygen::<Sha256Hasher>())
+    });
+    g.bench_function("fast/Sha256Hasher", |b| {
+        b.iter(|| slh_keygen_fast::<Sha256Hasher>())
+    });
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b
     g.finish();
 }
 
@@ -156,6 +171,23 @@ fn bench_xmss_root(c: &mut Criterion) {
         b.iter(|| xmss_node_fast::<RawSha256>(&sk, 0, HP, &pk, adrs))
     });
 
+<<<<<<< HEAD
+=======
+    g.bench_function("baseline_recursive/Sha256Hasher", |b| {
+        let sk = rng_n();
+        let pk = rng_n();
+        let adrs = Adrs::new(AdrsType::TreeNode);
+        b.iter(|| xmss_node::<Sha256Hasher>(&sk, 0, HP, &pk, adrs))
+    });
+
+    g.bench_function("fast_iterative/Sha256Hasher", |b| {
+        let sk = rng_n();
+        let pk = rng_n();
+        let adrs = Adrs::new(AdrsType::TreeNode);
+        b.iter(|| xmss_node_fast::<Sha256Hasher>(&sk, 0, HP, &pk, adrs))
+    });
+
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b
     g.finish();
 }
 
@@ -173,6 +205,15 @@ fn bench_wots_keygen(c: &mut Criterion) {
 
         b.iter(|| wots_pk_gen::<RawSha256>(&sk, &pk, &adrs))
     });
+<<<<<<< HEAD
+=======
+    g.bench_function("Sha256Hasher", |b| {
+        let sk = rng_n();
+        let pk = rng_n();
+        let adrs = Adrs::new(AdrsType::Wots);
+        b.iter(|| wots_pk_gen::<Sha256Hasher>(&sk, &pk, &adrs))
+    });
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b
 
     g.finish();
 }
@@ -188,15 +229,32 @@ fn bench_fors_sign(c: &mut Criterion) {
     g.bench_function("RawSha256", |b| {
         let sk = rng_n();
         let pk = rng_n();
+<<<<<<< HEAD
 
         let mut md = [0u8; MD_BYTES];
         OsRng.fill_bytes(&mut md);
 
+=======
+        let mut md = [0u8; MD_BYTES];
+        OsRng.fill_bytes(&mut md);
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b
         let mut adrs = Adrs::new(AdrsType::ForsTree);
         adrs.set_keypair_address(0);
 
         b.iter(|| fors_sign::<RawSha256>(&md, &sk, &pk, &adrs))
     });
+<<<<<<< HEAD
+=======
+    g.bench_function("Sha256Hasher", |b| {
+        let sk = rng_n();
+        let pk = rng_n();
+        let mut md = [0u8; MD_BYTES];
+        OsRng.fill_bytes(&mut md);
+        let mut adrs = Adrs::new(AdrsType::ForsTree);
+        adrs.set_keypair_address(0);
+        b.iter(|| fors_sign::<Sha256Hasher>(&md, &sk, &pk, &adrs))
+    });
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b
 
     g.finish();
 }
@@ -215,6 +273,7 @@ fn bench_alpha_comparison(c: &mut Criterion) {
 
     g.finish();
 
+<<<<<<< HEAD
     // print table (main point of this section)
     println!("\n=== parameter comparison ===");
 
@@ -226,6 +285,46 @@ fn bench_alpha_comparison(c: &mut Criterion) {
 
     for (name, val) in sets {
         println!("{name}: {val} bytes");
+=======
+    // Also print the human-readable table to stdout.
+    println!();
+    println!("=== SPHINCS-alpha parameter set comparison ===");
+    println!(
+        "{:28} {:>12} {:>12} {:>12} {:>10}",
+        "variant", "FORS (B)", "HT (B)", "total (B)", "FORS sec"
+    );
+    let sets: &[(&str, usize, usize, usize, f64)] = &[
+        (
+            "SHA2-256s (standard)",
+            Sha2_256s::fors_sig_bytes(),
+            Sha2_256s::ht_sig_bytes(),
+            Sha2_256s::total_sig_bytes(),
+            Sha2_256s::fors_security_bits(),
+        ),
+        (
+            "Alpha-128s-small (K=14,A=17)",
+            Alpha128sSmall::fors_sig_bytes(),
+            Alpha128sSmall::ht_sig_bytes(),
+            Alpha128sSmall::total_sig_bytes(),
+            Alpha128sSmall::fors_security_bits(),
+        ),
+        (
+            "Alpha-128s-fast  (K=35,A=9)",
+            Alpha128sFast::fors_sig_bytes(),
+            Alpha128sFast::ht_sig_bytes(),
+            Alpha128sFast::total_sig_bytes(),
+            Alpha128sFast::fors_security_bits(),
+        ),
+    ];
+    let std_total = Sha2_256s::total_sig_bytes();
+    for (name, fors, ht, total, sec) in sets {
+        let delta = (*total as isize - std_total as isize) * 100 / std_total as isize;
+        let sign = if delta >= 0 { "+" } else { "" };
+        println!(
+            "{:28} {:>12} {:>12} {:>10} ({sign}{delta:+}%)  {:>8.1}b",
+            name, fors, ht, total, sec
+        );
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b
     }
 }
 
@@ -297,4 +396,65 @@ criterion_group!(
     bench_group,
 );
 
+<<<<<<< HEAD
 criterion_main!(benches);
+=======
+// ── Group signature benchmarks ────────────────────────────────────────────────
+
+fn bench_group(c: &mut Criterion) {
+    use sphincs_rs::group::{
+        derive_member_key, group_identify_member, group_keygen, group_sign, group_verify,
+    };
+
+    let mut g = c.benchmark_group("group");
+    g.sample_size(10);
+
+    // group_keygen: same cost as slh_keygen_fast (builds one XMSS tree)
+    g.bench_function("keygen/RawSha256", |b| {
+        b.iter(|| group_keygen::<RawSha256>())
+    });
+
+    // group_sign for a single member (no extra overhead vs slh_sign_fast)
+    g.bench_function("sign/RawSha256", |b| {
+        b.iter_batched(
+            || {
+                let (mgr, _gpk) = group_keygen::<RawSha256>();
+                let msk = derive_member_key(&mgr, 0);
+                msk
+            },
+            |msk| group_sign::<RawSha256>(b"bench message", &msk),
+            BatchSize::SmallInput,
+        )
+    });
+
+    // group_verify: same as slh_verify
+    g.bench_function("verify/RawSha256", |b| {
+        b.iter_batched(
+            || {
+                let (mgr, gpk) = group_keygen::<RawSha256>();
+                let msk = derive_member_key(&mgr, 0);
+                let sig = group_sign::<RawSha256>(b"bench message", &msk);
+                (sig, gpk)
+            },
+            |(sig, gpk)| group_verify::<RawSha256>(b"bench message", &sig, &gpk),
+            BatchSize::SmallInput,
+        )
+    });
+
+    // group_identify: linear scan over all members (O(M) WOTS+ verifications)
+    g.bench_function("identify/RawSha256", |b| {
+        b.iter_batched(
+            || {
+                let (mgr, _gpk) = group_keygen::<RawSha256>();
+                let msk = derive_member_key(&mgr, 7);
+                let sig = group_sign::<RawSha256>(b"identify bench", &msk);
+                (mgr, sig)
+            },
+            |(mgr, sig)| group_identify_member::<RawSha256>(b"identify bench", &sig, &mgr),
+            BatchSize::SmallInput,
+        )
+    });
+
+    g.finish();
+}
+>>>>>>> b64f0cd10f94721a99763f528a27c831730cfe6b

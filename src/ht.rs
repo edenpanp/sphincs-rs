@@ -1,4 +1,4 @@
-//! HT (Hypertree) – D stacked XMSS layers.
+//! HT (Hypertree) - D stacked XMSS layers.
 //!
 //! Provides two signing strategies mirroring `xmss`:
 //!
@@ -64,7 +64,7 @@ pub fn ht_sign<S: SphincsHasher>(
     for j in 0..D {
         let leaf_j = leaf_index_for_layer(idx_leaf, j);
         let tree_j = tree_index_for_layer(idx_tree, j);
-        let adrs   = make_layer_adrs(j, tree_j);
+        let adrs = make_layer_adrs(j, tree_j);
 
         let sig_j = xmss::xmss_sign::<S>(&current_msg, sk_seed, leaf_j, pk_seed, adrs);
         current_msg = xmss::xmss_pk_from_sig::<S>(leaf_j, &sig_j, &current_msg, pk_seed, adrs);
@@ -91,7 +91,7 @@ pub fn ht_sign_fast<S: SphincsHasher>(
     for j in 0..D {
         let leaf_j = leaf_index_for_layer(idx_leaf, j);
         let tree_j = tree_index_for_layer(idx_tree, j);
-        let adrs   = make_layer_adrs(j, tree_j);
+        let adrs = make_layer_adrs(j, tree_j);
 
         // ← only this call differs from ht_sign
         let sig_j = xmss::xmss_sign_fast::<S>(&current_msg, sk_seed, leaf_j, pk_seed, adrs);
@@ -116,7 +116,7 @@ pub fn ht_verify<S: SphincsHasher>(
     for j in 0..D {
         let leaf_j = leaf_index_for_layer(idx_leaf, j);
         let tree_j = tree_index_for_layer(idx_tree, j);
-        let adrs   = make_layer_adrs(j, tree_j);
+        let adrs = make_layer_adrs(j, tree_j);
         node = xmss::xmss_pk_from_sig::<S>(leaf_j, &sig.xmss_sigs[j], &node, pk_seed, adrs);
     }
     node == *pk_root
@@ -131,7 +131,9 @@ mod tests {
     use rand::{RngCore, rngs::OsRng};
 
     fn rng_n() -> [u8; N] {
-        let mut b = [0u8; N]; OsRng.fill_bytes(&mut b); b
+        let mut b = [0u8; N];
+        OsRng.fill_bytes(&mut b);
+        b
     }
 
     fn ht_pk<S: SphincsHasher>(sk: &[u8; N], pk: &[u8; N]) -> [u8; N] {
@@ -144,7 +146,7 @@ mod tests {
     fn ht_baseline_roundtrip() {
         let (sk, pk, msg) = (rng_n(), rng_n(), rng_n());
         let root = ht_pk::<RawSha256>(&sk, &pk);
-        let sig  = ht_sign::<RawSha256>(&msg, &sk, &pk, 0, 0);
+        let sig = ht_sign::<RawSha256>(&msg, &sk, &pk, 0, 0);
         assert!(ht_verify::<RawSha256>(&msg, &sig, &pk, 0, 0, &root));
     }
 
@@ -153,7 +155,7 @@ mod tests {
     fn ht_fast_roundtrip() {
         let (sk, pk, msg) = (rng_n(), rng_n(), rng_n());
         let root = ht_pk::<RawSha256>(&sk, &pk);
-        let sig  = ht_sign_fast::<RawSha256>(&msg, &sk, &pk, 0, 0);
+        let sig = ht_sign_fast::<RawSha256>(&msg, &sk, &pk, 0, 0);
         assert!(ht_verify::<RawSha256>(&msg, &sig, &pk, 0, 0, &root));
     }
 
@@ -177,7 +179,7 @@ mod tests {
     fn ht_wrong_message_fails() {
         let (sk, pk, msg, wrong) = (rng_n(), rng_n(), rng_n(), rng_n());
         let root = ht_pk::<RawSha256>(&sk, &pk);
-        let sig  = ht_sign_fast::<RawSha256>(&msg, &sk, &pk, 0, 0);
+        let sig = ht_sign_fast::<RawSha256>(&msg, &sk, &pk, 0, 0);
         assert!(!ht_verify::<RawSha256>(&wrong, &sig, &pk, 0, 0, &root));
     }
 }
