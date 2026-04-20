@@ -195,8 +195,8 @@ impl SphincsHasher for Sha256Hasher {
         use sha2::{Digest, Sha256};
         let prefix = build_prefix(pk_seed, adrs);
         let mut h = Sha256::new();
-        h.update(prefix);   // 86 bytes: PK.seed(32) ‖ zeros(32) ‖ ADRSc(22)
-        h.update(sk_seed);  // 32 bytes: SK.seed
+        h.update(prefix); // 86 bytes: PK.seed(32) ‖ zeros(32) ‖ ADRSc(22)
+        h.update(sk_seed); // 32 bytes: SK.seed
         h.finalize().into()
     }
 
@@ -384,12 +384,16 @@ mod tests {
 
         let c = compress_adrs(&adrs);
 
-        assert_eq!(c[0],    0xAB,   "layer byte wrong");
-        assert_eq!(&c[1..9], &[0,0,0,0, 0xCD,0xEF,0x01,0x23], "tree bytes wrong");
-        assert_eq!(c[9],    0x00,   "type byte wrong (Wots=0)"); // AdrsType::Wots = 0
-        assert_eq!(&c[10..14], &[0x44,0x55,0x66,0x77], "keypair wrong");
-        assert_eq!(&c[14..18], &[0x11,0x22,0x33,0x44], "chain wrong");
-        assert_eq!(&c[18..22], &[0xAA,0xBB,0xCC,0xDD], "hash wrong");
+        assert_eq!(c[0], 0xAB, "layer byte wrong");
+        assert_eq!(
+            &c[1..9],
+            &[0, 0, 0, 0, 0xCD, 0xEF, 0x01, 0x23],
+            "tree bytes wrong"
+        );
+        assert_eq!(c[9], 0x00, "type byte wrong (Wots=0)"); // AdrsType::Wots = 0
+        assert_eq!(&c[10..14], &[0x44, 0x55, 0x66, 0x77], "keypair wrong");
+        assert_eq!(&c[14..18], &[0x11, 0x22, 0x33, 0x44], "chain wrong");
+        assert_eq!(&c[18..22], &[0xAA, 0xBB, 0xCC, 0xDD], "hash wrong");
     }
 
     // ── MGF1 ─────────────────────────────────────────────────────────────────
@@ -424,13 +428,17 @@ mod tests {
     /// Expected: b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7
     #[test]
     fn hmac_sha256_rfc4231_tc1() {
-        let key  = [0x0bu8; 20];
+        let key = [0x0bu8; 20];
         let data = b"Hi There";
-        let expected = hex::decode(
-            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
-        ).unwrap();
+        let expected =
+            hex::decode("b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7")
+                .unwrap();
         let result = hmac_sha256(&key, data);
-        assert_eq!(&result[..], expected.as_slice(), "HMAC-SHA-256 RFC4231 TC1 failed");
+        assert_eq!(
+            &result[..],
+            expected.as_slice(),
+            "HMAC-SHA-256 RFC4231 TC1 failed"
+        );
     }
 
     /// RFC 4231 Test Case 2: key="Jefe", data="what do ya want for nothing?"
@@ -440,30 +448,38 @@ mod tests {
     /// the value above is the cryptographically correct result.
     #[test]
     fn hmac_sha256_rfc4231_tc2() {
-        let key  = b"Jefe";
+        let key = b"Jefe";
         let data = b"what do ya want for nothing?";
-        let expected = hex::decode(
-            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
-        ).unwrap();
+        let expected =
+            hex::decode("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843")
+                .unwrap();
         let result = hmac_sha256(key, data);
-        assert_eq!(&result[..], expected.as_slice(),
+        assert_eq!(
+            &result[..],
+            expected.as_slice(),
             "HMAC-SHA-256 RFC4231 TC2 failed\n  got:      {}\n  expected: {}",
-            hex::encode(result), hex::encode(&expected));
+            hex::encode(result),
+            hex::encode(&expected)
+        );
     }
 
     /// RFC 4231 Test Case 3: key=[0xaa]*20, data=[0xdd]*50
     /// Expected: 773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe
     #[test]
     fn hmac_sha256_rfc4231_tc3() {
-        let key  = [0xaau8; 20];
+        let key = [0xaau8; 20];
         let data = [0xddu8; 50];
-        let expected = hex::decode(
-            "773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe"
-        ).unwrap();
+        let expected =
+            hex::decode("773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe")
+                .unwrap();
         let result = hmac_sha256(&key, &data);
-        assert_eq!(&result[..], expected.as_slice(),
+        assert_eq!(
+            &result[..],
+            expected.as_slice(),
             "HMAC-SHA-256 RFC4231 TC3 failed\n  got:      {}\n  expected: {}",
-            hex::encode(result), hex::encode(&expected));
+            hex::encode(result),
+            hex::encode(&expected)
+        );
     }
 
     // ── Sha256Hasher self-consistency ─────────────────────────────────────────
@@ -473,7 +489,7 @@ mod tests {
     fn sha256_prf_deterministic() {
         let pk_seed = [0x01u8; N];
         let sk_seed = [0x02u8; N];
-        let adrs    = Adrs::new(AdrsType::Wots);
+        let adrs = Adrs::new(AdrsType::Wots);
 
         let a = Sha256Hasher::prf(&pk_seed, &sk_seed, &adrs);
         let b = Sha256Hasher::prf(&pk_seed, &sk_seed, &adrs);
@@ -500,10 +516,10 @@ mod tests {
     /// H_msg output must be exactly M bytes.
     #[test]
     fn sha256_h_msg_output_length() {
-        let r       = [0xAAu8; N];
+        let r = [0xAAu8; N];
         let pk_seed = [0xBBu8; N];
         let pk_root = [0xCCu8; N];
-        let msg     = b"test message for h_msg";
+        let msg = b"test message for h_msg";
 
         let digest = Sha256Hasher::h_msg(&r, &pk_seed, &pk_root, msg);
         assert_eq!(digest.len(), M, "H_msg output must be M={M} bytes");
@@ -512,10 +528,10 @@ mod tests {
     /// H_msg must be deterministic.
     #[test]
     fn sha256_h_msg_deterministic() {
-        let r       = [0x11u8; N];
+        let r = [0x11u8; N];
         let pk_seed = [0x22u8; N];
         let pk_root = [0x33u8; N];
-        let msg     = b"determinism check";
+        let msg = b"determinism check";
 
         let a = Sha256Hasher::h_msg(&r, &pk_seed, &pk_root, msg);
         let b = Sha256Hasher::h_msg(&r, &pk_seed, &pk_root, msg);
@@ -526,17 +542,17 @@ mod tests {
     #[test]
     fn sha256_tweakable_hashes_deterministic_and_distinct() {
         let pk_seed = [0xFFu8; N];
-        let m1      = [0x11u8; N];
-        let m2      = [0x22u8; N];
-        let adrs    = Adrs::new(AdrsType::Wots);
+        let m1 = [0x11u8; N];
+        let m2 = [0x22u8; N];
+        let adrs = Adrs::new(AdrsType::Wots);
 
-        let f_out  = Sha256Hasher::f(&pk_seed, &adrs, &m1);
-        let h_out  = Sha256Hasher::h_two(&pk_seed, &adrs, &m1, &m2);
+        let f_out = Sha256Hasher::f(&pk_seed, &adrs, &m1);
+        let h_out = Sha256Hasher::h_two(&pk_seed, &adrs, &m1, &m2);
         let tl_out = Sha256Hasher::t_l(&pk_seed, &adrs, &[m1, m2]);
 
         // Determinism
-        assert_eq!(f_out,  Sha256Hasher::f(&pk_seed, &adrs, &m1));
-        assert_eq!(h_out,  Sha256Hasher::h_two(&pk_seed, &adrs, &m1, &m2));
+        assert_eq!(f_out, Sha256Hasher::f(&pk_seed, &adrs, &m1));
+        assert_eq!(h_out, Sha256Hasher::h_two(&pk_seed, &adrs, &m1, &m2));
         assert_eq!(tl_out, Sha256Hasher::t_l(&pk_seed, &adrs, &[m1, m2]));
 
         // Distinctness: F (1 block) must differ from H (2 blocks)
@@ -554,16 +570,16 @@ mod tests {
 
         let mut sk_seed = [0u8; N];
         let mut pk_seed = [0u8; N];
-        let mut msg     = [0u8; N];
+        let mut msg = [0u8; N];
         OsRng.fill_bytes(&mut sk_seed);
         OsRng.fill_bytes(&mut pk_seed);
         OsRng.fill_bytes(&mut msg);
 
         let adrs = Adrs::new(AdrsType::Wots);
 
-        let pk       = wots_pk_gen::<Sha256Hasher>(&sk_seed, &pk_seed, &adrs);
-        let sig      = wots_sign::<Sha256Hasher>(&msg, &sk_seed, &pk_seed, &adrs);
-        let pk_rec   = wots_pk_from_sig::<Sha256Hasher>(&sig, &msg, &pk_seed, &adrs);
+        let pk = wots_pk_gen::<Sha256Hasher>(&sk_seed, &pk_seed, &adrs);
+        let sig = wots_sign::<Sha256Hasher>(&msg, &sk_seed, &pk_seed, &adrs);
+        let pk_rec = wots_pk_from_sig::<Sha256Hasher>(&sig, &msg, &pk_seed, &adrs);
 
         assert_eq!(pk, pk_rec, "WOTS+ round-trip failed with Sha256Hasher");
     }

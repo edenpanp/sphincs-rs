@@ -1,86 +1,16 @@
-//! SPHINCS+ group signature scheme.
-//!
-//! # Overview
-//!
-//! A group signature allows any member of a group to sign a message on behalf
-//! of the group. The verifier learns that the signature is valid under the
-//! group's public key, but cannot determine *which* member produced it.
-//!
-//! # Construction (based on eprint 2025/760)
-//!
-//! The construction re-uses the SPHINCS+ tree structure:
-//!
-//! ```text
-//! Group public key  =  (PK.seed, group_root)
-//!                               │
-//!               ┌───────────────┴───────────────┐
-//!        XMSS layer D-1  (shared top-level tree)
-//!               │                               │
-//!         ...                             ...
-//!               │
-//!        XMSS layer 0
-//!               │
-//!   member 0  member 1  ...  member M-1
-//!   (leaf 0)  (leaf 1)       (leaf M-1)
-//! ```
-//!
-//! **Key generation:**
-//! - The *group manager* samples a shared `PK.seed` and `SK.seed`.
-//! - Each member `i` receives a **member secret key** consisting of:
-//!   - `SK.seed` (shared master secret — used to derive their leaf)
-//!   - `SK.prf_i` (individual PRF key for message randomness)
-//!   - `member_index: i` (which leaf they own)
-//!   - `PK.seed` (public, needed for hashing)
-//! - The **group public key** is `(PK.seed, group_root)` where
-//!   `group_root` is the top-level XMSS root (= SPHINCS+ `PK.root`).
-//!
-//! **Signing:**
-//! Member `i` produces a SPHINCS+ signature where the leaf index is
-//! forced to path through leaf `i` of the hypertree. This is structurally
-//! identical to `slh_sign` except:
-//!   1. `idx_leaf` is derived from `member_index` rather than the message digest.
-//!   2. The member uses their own `SK.prf_i` for message randomness, which
-//!      is unknown to other members and the manager.
-//!
-//! **Verification:**
-//! Standard `slh_verify` — the verifier only needs the group public key.
-//!
-//! **Anonymity:**
-//! The FORS signature and authentication path do not directly reveal which
-//! XMSS leaf was used as long as multiple members share the same top-level
-//! tree structure. A full anonymity proof requires that `idx_leaf` is
-//! computationally hidden from the signature; this construction achieves
-//! *computational anonymity* under the assumption that the FORS digest
-//! acts as a pseudorandom permutation over leaf indices (see §4 of 2025/760).
-//!
-//! # Limitations vs 2025/760
-//!
-//! The paper proposes a richer construction with an opening protocol
-//! (the manager can de-anonymise a specific signature) and a revocation
-//! mechanism. Those are not implemented here; this module provides the
-//! core sign/verify/identify-within-group functionality as a foundation.
-//!
-//! # Security parameter
-//!
-//! With HP=8, one XMSS layer supports up to 2^8 = 256 members.
-//! With D layers, the full group size is up to 2^(D×HP) = 2^64 (the full
-//! leaf space of the hypertree), but practically each "group" is scoped
-//! to a single top-level XMSS tree, giving 2^HP = 256 members.
+//! group signature experiment using the existing SPHINCS+ code.
+//! one group is one top XMSS tree, so with HP=8 this gives up to 256 members.
+//! roughly follows eprint 2025/760 but only keeps sign/verify/identify.
 
 use rand::{RngCore, rngs::OsRng};
 
-use crate::adrs::{Adrs, AdrsType};
+use crate::digest::{fors_adrs, split_digest};
 use crate::fors;
 use crate::hash::SphincsHasher;
 use crate::ht;
-use crate::params::{D, HP, IDX_LEAF_BYTES, IDX_TREE_BYTES, MD_BYTES, N};
-use crate::sphincs::{
-    SphincsSignature, SphincsPK, deserialise_sig,
-    slh_verify,
-};
+use crate::params::{D, HP, N};
+use crate::sphincs::{SphincsPK, SphincsSignature, deserialise_sig, slh_verify};
 use crate::xmss;
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 /// The group manager's master key material.
 ///
@@ -107,15 +37,15 @@ pub struct GroupManagerKey {
 #[derive(Clone)]
 pub struct MemberSK {
     /// Shared master secret — needed to compute WOTS+ leaf at `index`.
-    pub sk_seed:      [u8; N],
+    pub sk_seed: [u8; N],
     /// Per-member PRF key for message randomness.
     /// Each member has an independent `sk_prf` so their R values are
     /// unlinkable across signatures.
-    pub sk_prf:       [u8; N],
+    pub sk_prf: [u8; N],
     /// Public seed (same for all members).
-    pub pk_seed:      [u8; N],
+    pub pk_seed: [u8; N],
     /// Pre-computed group root.
-    pub group_root:   [u8; N],
+    pub group_root: [u8; N],
     /// This member's leaf index within the top-level XMSS tree (0..2^HP).
     pub member_index: u32,
 }
@@ -125,49 +55,79 @@ pub struct MemberSK {
 /// Any verifier can verify a group signature using only this key.
 /// It is structurally identical to a SPHINCS+ public key.
 pub struct GroupPK {
-    pub pk_seed:    [u8; N],
+    pub pk_seed: [u8; N],
     pub group_root: [u8; N],
 }
 
 impl GroupPK {
     /// Convert to the underlying SPHINCS+ public key for `slh_verify`.
     pub fn as_sphincs_pk(&self) -> SphincsPK {
-        SphincsPK { pk_seed: self.pk_seed, pk_root: self.group_root }
+        SphincsPK {
+            pk_seed: self.pk_seed,
+            pk_root: self.group_root,
+        }
     }
 }
 
-// ── Digest helpers (reused from sphincs.rs logic) ─────────────────────────────
-
-fn split_digest(digest: &[u8; crate::params::M]) -> ([u8; MD_BYTES], u64, u64) {
-    let mut md = [0u8; MD_BYTES];
-    md.copy_from_slice(&digest[..MD_BYTES]);
-
-    let idx_tree = {
-        let mut buf = [0u8; 8];
-        let len = IDX_TREE_BYTES.min(8);
-        buf[8 - len..].copy_from_slice(&digest[MD_BYTES..MD_BYTES + len]);
-        u64::from_be_bytes(buf)
-    };
-    // Note: idx_leaf from digest is IGNORED for group signing (overridden by member_index)
-    let idx_leaf = {
-        let mut buf = [0u8; 8];
-        let len = IDX_LEAF_BYTES.min(8);
-        let start = MD_BYTES + IDX_TREE_BYTES;
-        buf[8 - len..].copy_from_slice(&digest[start..start + len]);
-        u64::from_be_bytes(buf)
-    };
-    (md, idx_tree, idx_leaf)
+// compute top-level XMSS root (= group root). same as slh_keygen does
+// but pull out so we can test it seperately.
+pub fn compute_group_root<S: SphincsHasher>(sk_seed: &[u8; N], pk_seed: &[u8; N]) -> [u8; N] {
+    let mut adrs = crate::adrs::Adrs::new(crate::adrs::AdrsType::TreeNode);
+    adrs.set_layer_address((D - 1) as u32);
+    adrs.set_tree_address(0);
+    xmss::xmss_node_fast::<S>(sk_seed, 0, HP, pk_seed, adrs)
 }
 
-fn fors_adrs(idx_tree: u64, idx_leaf: u64) -> Adrs {
-    let mut adrs = Adrs::new(AdrsType::ForsTree);
-    adrs.set_layer_address(0);
-    adrs.set_tree_address(idx_tree);
-    adrs.set_keypair_address(idx_leaf as u32);
-    adrs
-}
+// search for r so digest's idx_leaf == target_leaf.
+// scan last 2 bytes of opt_rand, 2^16 combos. for HP=8 around 256 tries
+// on average. return None if all fail (basicly never).
+// TODO: maybe also randomize more bytes if 2 bytes not enough.
+pub fn search_r<S: SphincsHasher>(
+    msg: &[u8],
+    sk_prf: &[u8; N],
+    pk_seed: &[u8; N],
+    group_root: &[u8; N],
+    target_leaf: u64,
+) -> Option<[u8; N]> {
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        return (0u32..65536).into_par_iter().find_map_any(|idx| {
+            let hi = (idx >> 8) as u8;
+            let lo = (idx & 0xff) as u8;
+            let mut opt = *pk_seed;
+            opt[N - 2] = hi;
+            opt[N - 1] = lo;
+            let r_try = S::prf_msg(sk_prf, &opt, msg);
+            let d = S::h_msg(&r_try, pk_seed, group_root, msg);
+            let (_, _, leaf) = split_digest(&d);
+            if leaf == target_leaf { Some(r_try) } else { None }
+        });
+    }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+    // sequential fallback (no rayon).
+    let mut ans: Option<[u8; N]> = None;
+    let mut done = false;
+    for hi in 0u8..=255 {
+        if done {
+            break;
+        }
+        for lo in 0u8..=255 {
+            let mut opt = *pk_seed;
+            opt[N - 2] = hi;
+            opt[N - 1] = lo;
+            let r_try = S::prf_msg(sk_prf, &opt, msg);
+            let d = S::h_msg(&r_try, pk_seed, group_root, msg);
+            let (_, _, leaf) = split_digest(&d);
+            if leaf == target_leaf {
+                ans = Some(r_try);
+                done = true;
+                break;
+            }
+        }
+    }
+    ans
+}
 
 /// Generate a group key pair for up to `2^HP` members (FIPS 205 Alg. 18 variant).
 ///
@@ -178,11 +138,7 @@ pub fn group_keygen<S: SphincsHasher>() -> (GroupManagerKey, GroupPK) {
     OsRng.fill_bytes(&mut sk_seed);
     OsRng.fill_bytes(&mut pk_seed);
 
-    // Compute group root = top-level XMSS tree root
-    let mut adrs = Adrs::new(AdrsType::TreeNode);
-    adrs.set_layer_address((D - 1) as u32);
-    adrs.set_tree_address(0);
-    let group_root = xmss::xmss_node_fast::<S>(&sk_seed, 0, HP, &pk_seed, adrs);
+    let group_root = compute_group_root::<S>(&sk_seed, &pk_seed);
 
     let manager = GroupManagerKey {
         sk_seed,
@@ -190,7 +146,10 @@ pub fn group_keygen<S: SphincsHasher>() -> (GroupManagerKey, GroupPK) {
         group_root,
         max_members: 1 << HP,
     };
-    let gpk = GroupPK { pk_seed, group_root };
+    let gpk = GroupPK {
+        pk_seed,
+        group_root,
+    };
     (manager, gpk)
 }
 
@@ -209,10 +168,10 @@ pub fn derive_member_key(manager: &GroupManagerKey, index: u32) -> MemberSK {
     OsRng.fill_bytes(&mut sk_prf);
 
     MemberSK {
-        sk_seed:      manager.sk_seed,
+        sk_seed: manager.sk_seed,
         sk_prf,
-        pk_seed:      manager.pk_seed,
-        group_root:   manager.group_root,
+        pk_seed: manager.pk_seed,
+        group_root: manager.group_root,
         member_index: index,
     }
 }
@@ -230,102 +189,35 @@ pub fn derive_member_key(manager: &GroupManagerKey, index: u32) -> MemberSK {
 /// combination as in standard signing, but the HT signature always
 /// authenticates through the member's specific leaf.
 pub fn group_sign<S: SphincsHasher>(msg: &[u8], sk: &MemberSK) -> SphincsSignature {
-    let target_leaf = sk.member_index as u64;
-    let base_opt_rand = sk.pk_seed;
+    // find r so idx_leaf from digest == member_index. otherwise FORS and
+    // HT will not agree and verify fail.
+    let r = search_r::<S>(msg, &sk.sk_prf, &sk.pk_seed, &sk.group_root, sk.member_index as u64)
+        .expect("search_r: 2^16 tries exhausted");
+    let d = S::h_msg(&r, &sk.pk_seed, &sk.group_root, msg);
+    let (md, idx_tree, _) = split_digest(&d);
+    let idx_leaf = sk.member_index as u64;
 
-    // Search for r such that idx_leaf_from_digest matches target_leaf.
-    // This requires calling prf_msg and h_msg repeatedly, so we optimize by:
-    // 1. Using early exit on first match
-    // 2. Parallel search when feature "parallel" is enabled
-    // 3. Fallback to standard r if not found (extremely rare in practice)
+    let f_adrs = fors_adrs(idx_tree, idx_leaf);
+    let fors_sig = fors::fors_sign::<S>(&md, &sk.sk_seed, &sk.pk_seed, &f_adrs);
+    let fors_pk = fors::fors_pk_from_sig::<S>(&fors_sig, &md, &sk.pk_seed, &f_adrs);
+    let ht_sig = ht::ht_sign_fast::<S>(&fors_pk, &sk.sk_seed, &sk.pk_seed, idx_tree, idx_leaf);
 
-    #[cfg(feature = "parallel")]
-    let found_r: Option<[u8; N]> = {
-        use rayon::prelude::*;
-        (0u8..=255u8)
-            .into_par_iter()
-            .find_map_any(|hi| {
-                (0u8..=255u8).find_map(|lo| {
-                    let mut opt_rand = base_opt_rand;
-                    opt_rand[N - 2] = hi;
-                    opt_rand[N - 1] = lo;
-                    let r_candidate = S::prf_msg(&sk.sk_prf, &opt_rand, msg);
-                    let digest = S::h_msg(&r_candidate, &sk.pk_seed, &sk.group_root, msg);
-                    let (_, _, idx_leaf_from_digest) = split_digest(&digest);
-                    if idx_leaf_from_digest == target_leaf {
-                        Some(r_candidate)
-                    } else {
-                        None
-                    }
-                })
-            })
-    };
-
-    #[cfg(not(feature = "parallel"))]
-    let found_r: Option<[u8; N]> = {
-        // Sequential scan: iterate until we find a match
-        let mut result = None;
-        'outer: for hi in 0u8..=255 {
-            for lo in 0u8..=255 {
-                let mut opt_rand = base_opt_rand;
-                opt_rand[N - 2] = hi;
-                opt_rand[N - 1] = lo;
-
-                let r_candidate = S::prf_msg(&sk.sk_prf, &opt_rand, msg);
-                let digest = S::h_msg(&r_candidate, &sk.pk_seed, &sk.group_root, msg);
-                let (_, _, idx_leaf_from_digest) = split_digest(&digest);
-
-                if idx_leaf_from_digest == target_leaf {
-                    result = Some(r_candidate);
-                    break 'outer;
-                }
-            }
-        }
-        result
-    };
-
-    // If no match found in search space (extremely rare), use standard r
-    let r = found_r.unwrap_or_else(|| S::prf_msg(&sk.sk_prf, &sk.pk_seed, msg));
-
-// Recompute digest and md/idx_tree from chosen r
-let digest = S::h_msg(&r, &sk.pk_seed, &sk.group_root, msg);
-let (md, idx_tree, _idx_leaf_from_digest) = split_digest(&digest);
-
-// Use the member-assigned leaf for FORS and HT (forced).
-let idx_leaf = sk.member_index as u64;
-
-// FORS signature using forced leaf ADRS
-let f_adrs   = fors_adrs(idx_tree, idx_leaf);
-let fors_sig = fors::fors_sign::<S>(&md, &sk.sk_seed, &sk.pk_seed, &f_adrs);
-let fors_pk  = fors::fors_pk_from_sig::<S>(&fors_sig, &md, &sk.pk_seed, &f_adrs);
-
-// HT signature authenticating through the member's leaf
-let ht_sig = ht::ht_sign_fast::<S>(&fors_pk, &sk.sk_seed, &sk.pk_seed, idx_tree, idx_leaf);
-
-SphincsSignature { r, fors_sig, ht_sig }
+    SphincsSignature { r, fors_sig, ht_sig }
 }
 
 /// Verify a group signature (standard `slh_verify` under the group public key).
 ///
 /// Returns `true` iff the signature is valid under `gpk`.
 /// Does NOT reveal which member signed.
-pub fn group_verify<S: SphincsHasher>(
-    msg: &[u8],
-    sig: &SphincsSignature,
-    gpk: &GroupPK,
-) -> bool {
+pub fn group_verify<S: SphincsHasher>(msg: &[u8], sig: &SphincsSignature, gpk: &GroupPK) -> bool {
     slh_verify::<S>(msg, sig, &gpk.as_sphincs_pk())
 }
 
 /// Verify a group signature from raw bytes.
-pub fn group_verify_raw<S: SphincsHasher>(
-    msg: &[u8],
-    sig_bytes: &[u8],
-    gpk: &GroupPK,
-) -> bool {
+pub fn group_verify_raw<S: SphincsHasher>(msg: &[u8], sig_bytes: &[u8], gpk: &GroupPK) -> bool {
     match deserialise_sig(sig_bytes) {
         Some(sig) => group_verify::<S>(msg, &sig, gpk),
-        None      => false,
+        None => false,
     }
 }
 
@@ -348,26 +240,43 @@ pub fn group_identify_member<S: SphincsHasher>(
     sig: &SphincsSignature,
     manager: &GroupManagerKey,
 ) -> Option<u32> {
-    // Recover what leaf index the signer used, by re-running the digest split
-    let digest   = S::h_msg(&sig.r, &manager.pk_seed, &manager.group_root, msg);
-    let (md, idx_tree, _) = split_digest(&digest);
+    let d = S::h_msg(&sig.r, &manager.pk_seed, &manager.group_root, msg);
+    let (md, idx_tree, _) = split_digest(&d);
 
-    // Try each candidate member leaf
-    for candidate in 0..(manager.max_members as u32) {
-        let idx_leaf = candidate as u64;
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        return (0..(manager.max_members as u32))
+            .into_par_iter()
+            .find_any(|c| {
+                let leaf = *c as u64;
+                let f_adrs = fors_adrs(idx_tree, leaf);
+                let fpk =
+                    fors::fors_pk_from_sig::<S>(&sig.fors_sig, &md, &manager.pk_seed, &f_adrs);
+                ht::ht_verify::<S>(
+                    &fpk,
+                    &sig.ht_sig,
+                    &manager.pk_seed,
+                    idx_tree,
+                    leaf,
+                    &manager.group_root,
+                )
+            });
+    }
 
-        // Recover FORS PK for this candidate
-        let f_adrs  = fors_adrs(idx_tree, idx_leaf);
-        let fors_pk = fors::fors_pk_from_sig::<S>(
-            &sig.fors_sig, &md, &manager.pk_seed, &f_adrs,
-        );
-
-        // Verify HT path from this candidate leaf to the group root
+    for c in 0..(manager.max_members as u32) {
+        let leaf = c as u64;
+        let f_adrs = fors_adrs(idx_tree, leaf);
+        let fpk = fors::fors_pk_from_sig::<S>(&sig.fors_sig, &md, &manager.pk_seed, &f_adrs);
         if ht::ht_verify::<S>(
-            &fors_pk, &sig.ht_sig, &manager.pk_seed,
-            idx_tree, idx_leaf, &manager.group_root,
+            &fpk,
+            &sig.ht_sig,
+            &manager.pk_seed,
+            idx_tree,
+            leaf,
+            &manager.group_root,
         ) {
-            return Some(candidate);
+            return Some(c);
         }
     }
     None
@@ -379,15 +288,13 @@ pub fn group_identify_member<S: SphincsHasher>(
 mod tests {
     use super::*;
     use crate::hash::RawSha256;
-    use crate::sphincs::{serialise_sig, SIG_BYTES};
+    use crate::sphincs::{SIG_BYTES, serialise_sig};
 
-    /// Full group signature round-trip: keygen → member keys → sign → verify.
     #[test]
     fn group_sign_verify_roundtrip() {
         let (manager, gpk) = group_keygen::<RawSha256>();
         let msg = b"UNSW 26T1 Applied Cryptography group sig test";
 
-        // Try multiple member indices
         for idx in [0u32, 1, 7, (1 << HP) - 1] {
             let msk = derive_member_key(&manager, idx);
             let sig = group_sign::<RawSha256>(msg, &msk);
@@ -398,7 +305,6 @@ mod tests {
         }
     }
 
-    /// Wrong message must not verify.
     #[test]
     fn group_wrong_message_fails() {
         let (manager, gpk) = group_keygen::<RawSha256>();
@@ -407,7 +313,6 @@ mod tests {
         assert!(!group_verify::<RawSha256>(b"wrong", &sig, &gpk));
     }
 
-    /// Different group (different group_root) must not verify a signature.
     #[test]
     fn group_cross_group_fails() {
         let (manager1, gpk1) = group_keygen::<RawSha256>();
@@ -415,26 +320,30 @@ mod tests {
         let msk = derive_member_key(&manager1, 0);
         let msg = b"cross group test";
         let sig = group_sign::<RawSha256>(msg, &msk);
-        assert!( group_verify::<RawSha256>(msg, &sig, &gpk1), "valid sig rejected under own group");
-        assert!(!group_verify::<RawSha256>(msg, &sig, &gpk2), "sig accepted under different group");
+        assert!(
+            group_verify::<RawSha256>(msg, &sig, &gpk1),
+            "valid sig rejected under own group"
+        );
+        assert!(
+            !group_verify::<RawSha256>(msg, &sig, &gpk2),
+            "sig accepted under different group"
+        );
     }
 
-    /// group_sign + serialise + group_verify_raw round-trip.
     #[test]
     fn group_raw_roundtrip() {
         let (manager, gpk) = group_keygen::<RawSha256>();
         let msk = derive_member_key(&manager, 3);
         let msg = b"raw group sig test";
-        let sig      = group_sign::<RawSha256>(msg, &msk);
+        let sig = group_sign::<RawSha256>(msg, &msk);
         let sig_bytes = serialise_sig(&sig);
         assert_eq!(sig_bytes.len(), SIG_BYTES);
         assert!(group_verify_raw::<RawSha256>(msg, &sig_bytes, &gpk));
     }
 
-    /// Manager can identify which member signed.
     #[test]
     fn group_identify_correct_member() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
+        let (manager, _gpk) = group_keygen::<RawSha256>();
         let msg = b"identify me";
 
         for expected_idx in [0u32, 1, 5] {
@@ -442,40 +351,40 @@ mod tests {
             let sig = group_sign::<RawSha256>(msg, &msk);
             let found = group_identify_member::<RawSha256>(msg, &sig, &manager);
             assert_eq!(
-                found, Some(expected_idx),
+                found,
+                Some(expected_idx),
                 "manager identified wrong member: got {found:?}, expected Some({expected_idx})"
             );
         }
     }
 
-    /// Verifier cannot distinguish which member signed (anonymity smoke test).
-    ///
-    /// This test checks that signatures from different members are
-    /// structurally indistinguishable to the verifier: both verify correctly
-    /// under the group PK, and neither signature reveals the leaf index
-    /// in any directly accessible field.
     #[test]
     fn group_signatures_are_anonymous() {
         let (manager, gpk) = group_keygen::<RawSha256>();
-        let msg  = b"anonymous message";
+        let msg = b"anonymous message";
         let msk0 = derive_member_key(&manager, 0);
         let msk1 = derive_member_key(&manager, 1);
 
         let sig0 = group_sign::<RawSha256>(msg, &msk0);
         let sig1 = group_sign::<RawSha256>(msg, &msk1);
 
-        // Both verify correctly
-        assert!(group_verify::<RawSha256>(msg, &sig0, &gpk), "sig0 should verify");
-        assert!(group_verify::<RawSha256>(msg, &sig1, &gpk), "sig1 should verify");
+        assert!(
+            group_verify::<RawSha256>(msg, &sig0, &gpk),
+            "sig0 should verify"
+        );
+        assert!(
+            group_verify::<RawSha256>(msg, &sig1, &gpk),
+            "sig1 should verify"
+        );
 
-        // The verifier cannot tell which member signed (signatures look the same to it)
-        // We assert they differ at least structurally (different leaves → different sigs)
         let bytes0 = serialise_sig(&sig0);
         let bytes1 = serialise_sig(&sig1);
-        assert_ne!(bytes0, bytes1, "signatures from different members should differ");
+        assert_ne!(
+            bytes0, bytes1,
+            "signatures from different members should differ"
+        );
     }
 
-    /// Two signatures from the same member on different messages both verify.
     #[test]
     fn group_member_can_sign_multiple_messages() {
         let (manager, gpk) = group_keygen::<RawSha256>();
@@ -484,8 +393,40 @@ mod tests {
         let msgs: &[&[u8]] = &[b"msg one", b"msg two", b"msg three"];
         for msg in msgs {
             let sig = group_sign::<RawSha256>(msg, &msk);
-            assert!(group_verify::<RawSha256>(msg, &sig, &gpk),
-                "member 2 failed to verify for: {}", String::from_utf8_lossy(msg));
+            assert!(
+                group_verify::<RawSha256>(msg, &sig, &gpk),
+                "member 2 failed to verify for: {}",
+                String::from_utf8_lossy(msg)
+            );
         }
+    }
+
+    // check compute_group_root give the same root as keygen.
+    #[test]
+    fn compute_group_root_same_as_keygen() {
+        let (manager, _gpk) = group_keygen::<RawSha256>();
+        let again = compute_group_root::<RawSha256>(&manager.sk_seed, &manager.pk_seed);
+        assert_eq!(again, manager.group_root);
+    }
+
+    // search_r must find a r that make digest hit the target leaf.
+    #[test]
+    fn search_r_hits_target() {
+        let (manager, _gpk) = group_keygen::<RawSha256>();
+        let msk = derive_member_key(&manager, 4);
+        let msg = b"find target leaf";
+
+        let r = search_r::<RawSha256>(
+            msg,
+            &msk.sk_prf,
+            &msk.pk_seed,
+            &msk.group_root,
+            msk.member_index as u64,
+        )
+        .expect("search_r must hit within 2^16");
+        let digest = RawSha256::h_msg(&r, &msk.pk_seed, &msk.group_root, msg);
+        let (_, _, leaf) = split_digest(&digest);
+
+        assert_eq!(leaf, msk.member_index as u64);
     }
 }

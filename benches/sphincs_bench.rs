@@ -28,7 +28,7 @@
 //! | `fors_sign`        | FORS sign (22 trees × 14 levels)                  |
 //! | `alpha_comparison` | Print parameter-set size/security table (1 iter)  |
 
-use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use rand::{RngCore, rngs::OsRng};
 
 use sphincs_rs::adrs::{Adrs, AdrsType};
@@ -51,10 +51,18 @@ fn bench_keygen(c: &mut Criterion) {
     let mut g = c.benchmark_group("keygen");
     g.sample_size(10);
 
-    g.bench_function("baseline/RawSha256",    |b| b.iter(|| slh_keygen::<RawSha256>()));
-    g.bench_function("fast/RawSha256",        |b| b.iter(|| slh_keygen_fast::<RawSha256>()));
-    g.bench_function("baseline/Sha256Hasher", |b| b.iter(|| slh_keygen::<Sha256Hasher>()));
-    g.bench_function("fast/Sha256Hasher",     |b| b.iter(|| slh_keygen_fast::<Sha256Hasher>()));
+    g.bench_function("baseline/RawSha256", |b| {
+        b.iter(|| slh_keygen::<RawSha256>())
+    });
+    g.bench_function("fast/RawSha256", |b| {
+        b.iter(|| slh_keygen_fast::<RawSha256>())
+    });
+    g.bench_function("baseline/Sha256Hasher", |b| {
+        b.iter(|| slh_keygen::<Sha256Hasher>())
+    });
+    g.bench_function("fast/Sha256Hasher", |b| {
+        b.iter(|| slh_keygen_fast::<Sha256Hasher>())
+    });
     g.finish();
 }
 
@@ -144,25 +152,29 @@ fn bench_xmss_root(c: &mut Criterion) {
     g.sample_size(10);
 
     g.bench_function("baseline_recursive/RawSha256", |b| {
-        let sk = rng_n(); let pk = rng_n();
+        let sk = rng_n();
+        let pk = rng_n();
         let adrs = Adrs::new(AdrsType::TreeNode);
         b.iter(|| xmss_node::<RawSha256>(&sk, 0, HP, &pk, adrs))
     });
 
     g.bench_function("fast_iterative/RawSha256", |b| {
-        let sk = rng_n(); let pk = rng_n();
+        let sk = rng_n();
+        let pk = rng_n();
         let adrs = Adrs::new(AdrsType::TreeNode);
         b.iter(|| xmss_node_fast::<RawSha256>(&sk, 0, HP, &pk, adrs))
     });
 
     g.bench_function("baseline_recursive/Sha256Hasher", |b| {
-        let sk = rng_n(); let pk = rng_n();
+        let sk = rng_n();
+        let pk = rng_n();
         let adrs = Adrs::new(AdrsType::TreeNode);
         b.iter(|| xmss_node::<Sha256Hasher>(&sk, 0, HP, &pk, adrs))
     });
 
     g.bench_function("fast_iterative/Sha256Hasher", |b| {
-        let sk = rng_n(); let pk = rng_n();
+        let sk = rng_n();
+        let pk = rng_n();
         let adrs = Adrs::new(AdrsType::TreeNode);
         b.iter(|| xmss_node_fast::<Sha256Hasher>(&sk, 0, HP, &pk, adrs))
     });
@@ -177,12 +189,14 @@ fn bench_wots_keygen(c: &mut Criterion) {
     let mut g = c.benchmark_group("wots_keygen");
 
     g.bench_function("RawSha256", |b| {
-        let sk = rng_n(); let pk = rng_n();
+        let sk = rng_n();
+        let pk = rng_n();
         let adrs = Adrs::new(AdrsType::Wots);
         b.iter(|| wots_pk_gen::<RawSha256>(&sk, &pk, &adrs))
     });
     g.bench_function("Sha256Hasher", |b| {
-        let sk = rng_n(); let pk = rng_n();
+        let sk = rng_n();
+        let pk = rng_n();
         let adrs = Adrs::new(AdrsType::Wots);
         b.iter(|| wots_pk_gen::<Sha256Hasher>(&sk, &pk, &adrs))
     });
@@ -198,15 +212,19 @@ fn bench_fors_sign(c: &mut Criterion) {
     g.sample_size(20);
 
     g.bench_function("RawSha256", |b| {
-        let sk = rng_n(); let pk = rng_n();
-        let mut md = [0u8; MD_BYTES]; OsRng.fill_bytes(&mut md);
+        let sk = rng_n();
+        let pk = rng_n();
+        let mut md = [0u8; MD_BYTES];
+        OsRng.fill_bytes(&mut md);
         let mut adrs = Adrs::new(AdrsType::ForsTree);
         adrs.set_keypair_address(0);
         b.iter(|| fors_sign::<RawSha256>(&md, &sk, &pk, &adrs))
     });
     g.bench_function("Sha256Hasher", |b| {
-        let sk = rng_n(); let pk = rng_n();
-        let mut md = [0u8; MD_BYTES]; OsRng.fill_bytes(&mut md);
+        let sk = rng_n();
+        let pk = rng_n();
+        let mut md = [0u8; MD_BYTES];
+        OsRng.fill_bytes(&mut md);
         let mut adrs = Adrs::new(AdrsType::ForsTree);
         adrs.set_keypair_address(0);
         b.iter(|| fors_sign::<Sha256Hasher>(&md, &sk, &pk, &adrs))
@@ -256,25 +274,41 @@ fn bench_alpha_comparison(c: &mut Criterion) {
     // Also print the human-readable table to stdout.
     println!();
     println!("=== SPHINCS-alpha parameter set comparison ===");
-    println!("{:28} {:>12} {:>12} {:>12} {:>10}",
-             "variant", "FORS (B)", "HT (B)", "total (B)", "FORS sec");
+    println!(
+        "{:28} {:>12} {:>12} {:>12} {:>10}",
+        "variant", "FORS (B)", "HT (B)", "total (B)", "FORS sec"
+    );
     let sets: &[(&str, usize, usize, usize, f64)] = &[
-        ("SHA2-256s (standard)",
-         Sha2_256s::fors_sig_bytes(), Sha2_256s::ht_sig_bytes(),
-         Sha2_256s::total_sig_bytes(), Sha2_256s::fors_security_bits()),
-        ("Alpha-128s-small (K=14,A=17)",
-         Alpha128sSmall::fors_sig_bytes(), Alpha128sSmall::ht_sig_bytes(),
-         Alpha128sSmall::total_sig_bytes(), Alpha128sSmall::fors_security_bits()),
-        ("Alpha-128s-fast  (K=35,A=9)",
-         Alpha128sFast::fors_sig_bytes(), Alpha128sFast::ht_sig_bytes(),
-         Alpha128sFast::total_sig_bytes(), Alpha128sFast::fors_security_bits()),
+        (
+            "SHA2-256s (standard)",
+            Sha2_256s::fors_sig_bytes(),
+            Sha2_256s::ht_sig_bytes(),
+            Sha2_256s::total_sig_bytes(),
+            Sha2_256s::fors_security_bits(),
+        ),
+        (
+            "Alpha-128s-small (K=14,A=17)",
+            Alpha128sSmall::fors_sig_bytes(),
+            Alpha128sSmall::ht_sig_bytes(),
+            Alpha128sSmall::total_sig_bytes(),
+            Alpha128sSmall::fors_security_bits(),
+        ),
+        (
+            "Alpha-128s-fast  (K=35,A=9)",
+            Alpha128sFast::fors_sig_bytes(),
+            Alpha128sFast::ht_sig_bytes(),
+            Alpha128sFast::total_sig_bytes(),
+            Alpha128sFast::fors_security_bits(),
+        ),
     ];
     let std_total = Sha2_256s::total_sig_bytes();
     for (name, fors, ht, total, sec) in sets {
         let delta = (*total as isize - std_total as isize) * 100 / std_total as isize;
         let sign = if delta >= 0 { "+" } else { "" };
-        println!("{:28} {:>12} {:>12} {:>10} ({sign}{delta:+}%)  {:>8.1}b",
-                 name, fors, ht, total, sec);
+        println!(
+            "{:28} {:>12} {:>12} {:>10} ({sign}{delta:+}%)  {:>8.1}b",
+            name, fors, ht, total, sec
+        );
     }
     println!();
     println!("SIG_BYTES constant (in code): {SIG_BYTES}");
@@ -299,8 +333,9 @@ criterion_main!(benches);
 // ── Group signature benchmarks ────────────────────────────────────────────────
 
 fn bench_group(c: &mut Criterion) {
-    use sphincs_rs::group::{derive_member_key, group_keygen, group_sign, group_verify,
-                             group_identify_member};
+    use sphincs_rs::group::{
+        derive_member_key, group_identify_member, group_keygen, group_sign, group_verify,
+    };
 
     let mut g = c.benchmark_group("group");
     g.sample_size(10);

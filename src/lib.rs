@@ -53,13 +53,14 @@
 //! - `params_alpha`: SPHINCS-alpha parameter analysis showing that (K=14, A=17)
 //!   reduces FORS signature size by 24% vs the NIST standard.
 
+pub mod adrs;
+pub mod digest;
+pub mod fors;
+pub mod group;
+pub mod hash;
+pub mod ht;
 pub mod params;
 pub mod params_alpha;
-pub mod adrs;
-pub mod hash;
+pub mod sphincs;
 pub mod wots;
 pub mod xmss;
-pub mod fors;
-pub mod ht;
-pub mod sphincs;
-pub mod group;

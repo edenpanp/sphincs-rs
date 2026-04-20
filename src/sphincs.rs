@@ -37,7 +37,7 @@ use crate::xmss::{self, XmssSig};
 
 pub struct SphincsSK {
     pub sk_seed: [u8; N],
-    pub sk_prf:  [u8; N],
+    pub sk_prf: [u8; N],
     pub pk_seed: [u8; N],
     pub pk_root: [u8; N],
 }
@@ -48,9 +48,9 @@ pub struct SphincsPK {
 }
 
 pub struct SphincsSignature {
-    pub r:        [u8; N],
+    pub r: [u8; N],
     pub fors_sig: ForsSig,
-    pub ht_sig:   HtSig,
+    pub ht_sig: HtSig,
 }
 
 // ── Digest helpers ────────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ fn top_layer_adrs() -> Adrs {
 /// Generate a key pair using the **baseline** recursive XMSS strategy (Alg. 18).
 pub fn slh_keygen<S: SphincsHasher>() -> (SphincsSK, SphincsPK) {
     let mut sk_seed = [0u8; N];
-    let mut sk_prf  = [0u8; N];
+    let mut sk_prf = [0u8; N];
     let mut pk_seed = [0u8; N];
     OsRng.fill_bytes(&mut sk_seed);
     OsRng.fill_bytes(&mut sk_prf);
@@ -103,23 +103,32 @@ pub fn slh_keygen<S: SphincsHasher>() -> (SphincsSK, SphincsPK) {
 
     let pk_root = xmss::xmss_node::<S>(&sk_seed, 0, HP, &pk_seed, top_layer_adrs());
 
-    let sk = SphincsSK { sk_seed, sk_prf, pk_seed, pk_root };
+    let sk = SphincsSK {
+        sk_seed,
+        sk_prf,
+        pk_seed,
+        pk_root,
+    };
     let pk = SphincsPK { pk_seed, pk_root };
     (sk, pk)
 }
 
 /// Sign with the **baseline** recursive strategy (Alg. 19).
 pub fn slh_sign<S: SphincsHasher>(msg: &[u8], sk: &SphincsSK) -> SphincsSignature {
-    let r      = S::prf_msg(&sk.sk_prf, &sk.pk_seed, msg);
+    let r = S::prf_msg(&sk.sk_prf, &sk.pk_seed, msg);
     let digest = S::h_msg(&r, &sk.pk_seed, &sk.pk_root, msg);
     let (md, idx_tree, idx_leaf) = split_digest(&digest);
 
-    let f_adrs   = fors_adrs(idx_tree, idx_leaf);
+    let f_adrs = fors_adrs(idx_tree, idx_leaf);
     let fors_sig = fors::fors_sign::<S>(&md, &sk.sk_seed, &sk.pk_seed, &f_adrs);
-    let fors_pk  = fors::fors_pk_from_sig::<S>(&fors_sig, &md, &sk.pk_seed, &f_adrs);
+    let fors_pk = fors::fors_pk_from_sig::<S>(&fors_sig, &md, &sk.pk_seed, &f_adrs);
 
     let ht_sig = ht::ht_sign::<S>(&fors_pk, &sk.sk_seed, &sk.pk_seed, idx_tree, idx_leaf);
-    SphincsSignature { r, fors_sig, ht_sig }
+    SphincsSignature {
+        r,
+        fors_sig,
+        ht_sig,
+    }
 }
 
 // ── Optimised API (iterative bottom-up + optional Rayon) ─────────────────────
@@ -140,7 +149,7 @@ pub fn slh_sign<S: SphincsHasher>(msg: &[u8], sk: &SphincsSK) -> SphincsSignatur
 /// | Stack depth       | HP = 8 frames  | O(1) (iterative)       | O(1) (iterative)              |
 pub fn slh_keygen_fast<S: SphincsHasher>() -> (SphincsSK, SphincsPK) {
     let mut sk_seed = [0u8; N];
-    let mut sk_prf  = [0u8; N];
+    let mut sk_prf = [0u8; N];
     let mut pk_seed = [0u8; N];
     OsRng.fill_bytes(&mut sk_seed);
     OsRng.fill_bytes(&mut sk_prf);
@@ -149,7 +158,12 @@ pub fn slh_keygen_fast<S: SphincsHasher>() -> (SphincsSK, SphincsPK) {
     // ← only this call differs: iterative bottom-up tree
     let pk_root = xmss::xmss_node_fast::<S>(&sk_seed, 0, HP, &pk_seed, top_layer_adrs());
 
-    let sk = SphincsSK { sk_seed, sk_prf, pk_seed, pk_root };
+    let sk = SphincsSK {
+        sk_seed,
+        sk_prf,
+        pk_seed,
+        pk_root,
+    };
     let pk = SphincsPK { pk_seed, pk_root };
     (sk, pk)
 }
@@ -159,34 +173,41 @@ pub fn slh_keygen_fast<S: SphincsHasher>() -> (SphincsSK, SphincsPK) {
 /// Each of the D XMSS layers builds its tree bottom-up (and in parallel with
 /// the `parallel` feature) instead of recomputing subtrees per auth-path node.
 pub fn slh_sign_fast<S: SphincsHasher>(msg: &[u8], sk: &SphincsSK) -> SphincsSignature {
-    let r      = S::prf_msg(&sk.sk_prf, &sk.pk_seed, msg);
+    let r = S::prf_msg(&sk.sk_prf, &sk.pk_seed, msg);
     let digest = S::h_msg(&r, &sk.pk_seed, &sk.pk_root, msg);
     let (md, idx_tree, idx_leaf) = split_digest(&digest);
 
-    let f_adrs   = fors_adrs(idx_tree, idx_leaf);
+    let f_adrs = fors_adrs(idx_tree, idx_leaf);
     let fors_sig = fors::fors_sign::<S>(&md, &sk.sk_seed, &sk.pk_seed, &f_adrs);
-    let fors_pk  = fors::fors_pk_from_sig::<S>(&fors_sig, &md, &sk.pk_seed, &f_adrs);
+    let fors_pk = fors::fors_pk_from_sig::<S>(&fors_sig, &md, &sk.pk_seed, &f_adrs);
 
     // ← only this call differs: ht_sign_fast uses xmss_sign_fast internally
     let ht_sig = ht::ht_sign_fast::<S>(&fors_pk, &sk.sk_seed, &sk.pk_seed, idx_tree, idx_leaf);
-    SphincsSignature { r, fors_sig, ht_sig }
+    SphincsSignature {
+        r,
+        fors_sig,
+        ht_sig,
+    }
 }
 
 // ── Shared verification ───────────────────────────────────────────────────────
 
 /// Verify a signature (FIPS 205 Alg. 20). Shared by both strategies.
-pub fn slh_verify<S: SphincsHasher>(
-    msg: &[u8],
-    sig: &SphincsSignature,
-    pk: &SphincsPK,
-) -> bool {
+pub fn slh_verify<S: SphincsHasher>(msg: &[u8], sig: &SphincsSignature, pk: &SphincsPK) -> bool {
     let digest = S::h_msg(&sig.r, &pk.pk_seed, &pk.pk_root, msg);
     let (md, idx_tree, idx_leaf) = split_digest(&digest);
 
-    let f_adrs  = fors_adrs(idx_tree, idx_leaf);
+    let f_adrs = fors_adrs(idx_tree, idx_leaf);
     let fors_pk = fors::fors_pk_from_sig::<S>(&sig.fors_sig, &md, &pk.pk_seed, &f_adrs);
 
-    ht::ht_verify::<S>(&fors_pk, &sig.ht_sig, &pk.pk_seed, idx_tree, idx_leaf, &pk.pk_root)
+    ht::ht_verify::<S>(
+        &fors_pk,
+        &sig.ht_sig,
+        &pk.pk_seed,
+        idx_tree,
+        idx_leaf,
+        &pk.pk_root,
+    )
 }
 
 // ── Byte-level serialisation ──────────────────────────────────────────────────
@@ -196,8 +217,7 @@ pub fn slh_verify<S: SphincsHasher>(
 //           = 32 + 10560 + 19200 = 29792  (SHA2-256s)
 
 /// Total byte length of a serialised SPHINCS+ signature.
-pub const SIG_BYTES: usize =
-    N                          // R
+pub const SIG_BYTES: usize = N                          // R
     + K * (1 + A) * N          // SIG_FORS
     + D * (WOTS_LEN + HP) * N; // SIG_HT
 
@@ -207,11 +227,17 @@ pub fn serialise_sig(sig: &SphincsSignature) -> Vec<u8> {
     out.extend_from_slice(&sig.r);
     for tree in &sig.fors_sig.trees {
         out.extend_from_slice(&tree.sk);
-        for node in &tree.auth { out.extend_from_slice(node); }
+        for node in &tree.auth {
+            out.extend_from_slice(node);
+        }
     }
     for xs in &sig.ht_sig.xmss_sigs {
-        for cv in &xs.sig_wots { out.extend_from_slice(cv); }
-        for node in &xs.auth   { out.extend_from_slice(node); }
+        for cv in &xs.sig_wots {
+            out.extend_from_slice(cv);
+        }
+        for node in &xs.auth {
+            out.extend_from_slice(node);
+        }
     }
     debug_assert_eq!(out.len(), SIG_BYTES);
     out
@@ -220,7 +246,9 @@ pub fn serialise_sig(sig: &SphincsSignature) -> Vec<u8> {
 /// Deserialise raw bytes into a [`SphincsSignature`].
 /// Returns `None` if the byte slice has wrong length.
 pub fn deserialise_sig(bytes: &[u8]) -> Option<SphincsSignature> {
-    if bytes.len() != SIG_BYTES { return None; }
+    if bytes.len() != SIG_BYTES {
+        return None;
+    }
     let mut pos = 0;
     let read = |pos: &mut usize| -> [u8; N] {
         let mut out = [0u8; N];
@@ -235,23 +263,29 @@ pub fn deserialise_sig(bytes: &[u8]) -> Option<SphincsSignature> {
     for _ in 0..K {
         let sk = read(&mut pos);
         let mut auth = [[0u8; N]; A];
-        for node in auth.iter_mut() { *node = read(&mut pos); }
+        for node in auth.iter_mut() {
+            *node = read(&mut pos);
+        }
         fors_trees.push(ForsTreeSig { sk, auth });
     }
 
     let mut xmss_sigs = Vec::with_capacity(D);
     for _ in 0..D {
         let mut sig_wots: WotsSig = [[0u8; N]; WOTS_LEN];
-        for cv in sig_wots.iter_mut() { *cv = read(&mut pos); }
+        for cv in sig_wots.iter_mut() {
+            *cv = read(&mut pos);
+        }
         let mut auth = [[0u8; N]; HP];
-        for node in auth.iter_mut() { *node = read(&mut pos); }
+        for node in auth.iter_mut() {
+            *node = read(&mut pos);
+        }
         xmss_sigs.push(XmssSig { sig_wots, auth });
     }
 
     Some(SphincsSignature {
         r,
         fors_sig: fors::ForsSig { trees: fors_trees },
-        ht_sig:   ht::HtSig { xmss_sigs },
+        ht_sig: ht::HtSig { xmss_sigs },
     })
 }
 
@@ -269,7 +303,7 @@ pub fn slh_sign_raw_fast<S: SphincsHasher>(msg: &[u8], sk: &SphincsSK) -> Vec<u8
 pub fn slh_verify_raw<S: SphincsHasher>(msg: &[u8], sig_bytes: &[u8], pk: &SphincsPK) -> bool {
     match deserialise_sig(sig_bytes) {
         Some(sig) => slh_verify::<S>(msg, &sig, pk),
-        None      => false,
+        None => false,
     }
 }
 
@@ -341,10 +375,10 @@ mod tests {
     #[test]
     fn slh_wrong_key_fails() {
         let (sk1, pk1) = slh_keygen_fast::<RawSha256>();
-        let (_, pk2)   = slh_keygen_fast::<RawSha256>();
+        let (_, pk2) = slh_keygen_fast::<RawSha256>();
         let msg = b"cross-key test";
         let sig = slh_sign_fast::<RawSha256>(msg, &sk1);
-        assert!( slh_verify::<RawSha256>(msg, &sig, &pk1));
+        assert!(slh_verify::<RawSha256>(msg, &sig, &pk1));
         assert!(!slh_verify::<RawSha256>(msg, &sig, &pk2));
     }
 
@@ -353,10 +387,10 @@ mod tests {
     #[test]
     fn sig_serialise_roundtrip() {
         let (sk, pk) = slh_keygen_fast::<RawSha256>();
-        let msg   = b"serialisation round-trip";
-        let sig   = slh_sign_fast::<RawSha256>(msg, &sk);
+        let msg = b"serialisation round-trip";
+        let sig = slh_sign_fast::<RawSha256>(msg, &sk);
         let bytes = serialise_sig(&sig);
-        let sig2  = deserialise_sig(&bytes).expect("deserialise failed");
+        let sig2 = deserialise_sig(&bytes).expect("deserialise failed");
         assert!(slh_verify::<RawSha256>(msg, &sig2, &pk));
     }
 

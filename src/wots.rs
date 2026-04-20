@@ -37,8 +37,8 @@ fn base_w_and_checksum(msg: &[u8; N]) -> [u8; WOTS_LEN] {
     // Step 1: expand N bytes → WOTS_LEN1 nibbles (base-16 digits)
     let mut digits = [0u8; WOTS_LEN];
     for (i, &byte) in msg.iter().enumerate() {
-        digits[2 * i]     = (byte >> 4) & 0x0F;
-        digits[2 * i + 1] =  byte       & 0x0F;
+        digits[2 * i] = (byte >> 4) & 0x0F;
+        digits[2 * i + 1] = byte & 0x0F;
     }
     // Sanity: N * 2 must equal WOTS_LEN1 (32 * 2 = 64 ✓)
     debug_assert_eq!(N * 2, WOTS_LEN1);
@@ -54,8 +54,8 @@ fn base_w_and_checksum(msg: &[u8; N]) -> [u8; WOTS_LEN] {
     let all_nibbles: [u8; 8] = {
         let mut n = [0u8; 8];
         for (i, &b) in checksum_bytes.iter().enumerate() {
-            n[2 * i]     = (b >> 4) & 0x0F;
-            n[2 * i + 1] =  b       & 0x0F;
+            n[2 * i] = (b >> 4) & 0x0F;
+            n[2 * i + 1] = b & 0x0F;
         }
         n
     };
@@ -122,11 +122,7 @@ fn derive_sk<S: SphincsHasher>(
 /// ```
 ///
 /// The returned value is the compressed N-byte WOTS+ public key.
-pub fn wots_pk_gen<S: SphincsHasher>(
-    sk_seed: &[u8; N],
-    pk_seed: &[u8; N],
-    adrs: &Adrs,
-) -> [u8; N] {
+pub fn wots_pk_gen<S: SphincsHasher>(sk_seed: &[u8; N], pk_seed: &[u8; N], adrs: &Adrs) -> [u8; N] {
     let mut tmp = [[0u8; N]; WOTS_LEN];
 
     for i in 0..WOTS_LEN {
@@ -222,7 +218,7 @@ mod tests {
     fn wots_sign_verify_roundtrip() {
         let mut sk_seed = [0u8; N];
         let mut pk_seed = [0u8; N];
-        let mut msg     = [0u8; N];
+        let mut msg = [0u8; N];
         OsRng.fill_bytes(&mut sk_seed);
         OsRng.fill_bytes(&mut pk_seed);
         OsRng.fill_bytes(&mut msg);
@@ -247,10 +243,10 @@ mod tests {
     /// Wrong message must not verify.
     #[test]
     fn wots_wrong_message_fails() {
-        let mut sk_seed  = [0u8; N];
-        let mut pk_seed  = [0u8; N];
-        let mut msg      = [0u8; N];
-        let mut wrong    = [0u8; N];
+        let mut sk_seed = [0u8; N];
+        let mut pk_seed = [0u8; N];
+        let mut msg = [0u8; N];
+        let mut wrong = [0u8; N];
         OsRng.fill_bytes(&mut sk_seed);
         OsRng.fill_bytes(&mut pk_seed);
         OsRng.fill_bytes(&mut msg);
@@ -258,7 +254,7 @@ mod tests {
 
         let adrs = Adrs::new(AdrsType::Wots);
 
-        let pk  = wots_pk_gen::<RawSha256>(&sk_seed, &pk_seed, &adrs);
+        let pk = wots_pk_gen::<RawSha256>(&sk_seed, &pk_seed, &adrs);
         let sig = wots_sign::<RawSha256>(&msg, &sk_seed, &pk_seed, &adrs);
         let pk_wrong = wots_pk_from_sig::<RawSha256>(&sig, &wrong, &pk_seed, &adrs);
 
