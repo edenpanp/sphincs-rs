@@ -29,11 +29,11 @@
 /// Discriminant for the five SPHINCS+ address types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdrsType {
-    Wots     = 0,
-    WotsPk   = 1,
+    Wots = 0,
+    WotsPk = 1,
     TreeNode = 2,
     ForsTree = 3,
-    ForsPk   = 4,
+    ForsPk = 4,
 }
 
 impl AdrsType {
@@ -51,10 +51,10 @@ impl AdrsType {
 /// for specific contexts rather than manipulating the raw bytes directly.
 #[derive(Clone, Copy, Debug)]
 pub struct Adrs {
-    pub layer_address: [u8; 4],  //  4 bytes – layer in the hypertree
-    pub tree_address: [u8; 12],  // 12 bytes – tree within the layer (64-bit + 4 padding)
-    pub adrs_type: AdrsType,     //  4 bytes – discriminant stored as u32
-    pub type_bits: [u8; 12],     // 12 bytes – type-specific fields (see table above)
+    pub layer_address: [u8; 4], //  4 bytes – layer in the hypertree
+    pub tree_address: [u8; 12], // 12 bytes – tree within the layer (64-bit + 4 padding)
+    pub adrs_type: AdrsType,    //  4 bytes – discriminant stored as u32
+    pub type_bits: [u8; 12],    // 12 bytes – type-specific fields (see table above)
 }
 
 impl Adrs {
@@ -186,16 +186,16 @@ impl Adrs {
 
 pub struct WotsAdrs {
     pub keypair_address: [u8; 4],
-    pub chain_address:   [u8; 4],
-    pub hash_address:    [u8; 4],
+    pub chain_address: [u8; 4],
+    pub hash_address: [u8; 4],
 }
 
 impl WotsAdrs {
     pub fn from_type_bits(bits: &[u8; 12]) -> Self {
         WotsAdrs {
             keypair_address: bits[0..4].try_into().unwrap(),
-            chain_address:   bits[4..8].try_into().unwrap(),
-            hash_address:    bits[8..12].try_into().unwrap(),
+            chain_address: bits[4..8].try_into().unwrap(),
+            hash_address: bits[8..12].try_into().unwrap(),
         }
     }
     pub fn to_type_bits(&self) -> [u8; 12] {
@@ -213,7 +213,9 @@ pub struct WotsPkAdrs {
 
 impl WotsPkAdrs {
     pub fn from_type_bits(bits: &[u8; 12]) -> Self {
-        WotsPkAdrs { keypair_address: bits[0..4].try_into().unwrap() }
+        WotsPkAdrs {
+            keypair_address: bits[0..4].try_into().unwrap(),
+        }
     }
     pub fn to_type_bits(&self) -> [u8; 12] {
         let mut out = [0u8; 12];
@@ -224,14 +226,14 @@ impl WotsPkAdrs {
 
 pub struct TreeNodeAdrs {
     pub tree_height: [u8; 4],
-    pub tree_index:  [u8; 4],
+    pub tree_index: [u8; 4],
 }
 
 impl TreeNodeAdrs {
     pub fn from_type_bits(bits: &[u8; 12]) -> Self {
         TreeNodeAdrs {
             tree_height: bits[4..8].try_into().unwrap(),
-            tree_index:  bits[8..12].try_into().unwrap(),
+            tree_index: bits[8..12].try_into().unwrap(),
         }
     }
     pub fn to_type_bits(&self) -> [u8; 12] {
@@ -244,16 +246,16 @@ impl TreeNodeAdrs {
 
 pub struct ForsTreeAdrs {
     pub keypair_address: [u8; 4],
-    pub tree_height:     [u8; 4],
-    pub tree_index:      [u8; 4],
+    pub tree_height: [u8; 4],
+    pub tree_index: [u8; 4],
 }
 
 impl ForsTreeAdrs {
     pub fn from_type_bits(bits: &[u8; 12]) -> Self {
         ForsTreeAdrs {
             keypair_address: bits[0..4].try_into().unwrap(),
-            tree_height:     bits[4..8].try_into().unwrap(),
-            tree_index:      bits[8..12].try_into().unwrap(),
+            tree_height: bits[4..8].try_into().unwrap(),
+            tree_index: bits[8..12].try_into().unwrap(),
         }
     }
     pub fn to_type_bits(&self) -> [u8; 12] {
@@ -271,7 +273,9 @@ pub struct ForsPkAdrs {
 
 impl ForsPkAdrs {
     pub fn from_type_bits(bits: &[u8; 12]) -> Self {
-        ForsPkAdrs { keypair_address: bits[0..4].try_into().unwrap() }
+        ForsPkAdrs {
+            keypair_address: bits[0..4].try_into().unwrap(),
+        }
     }
     pub fn to_type_bits(&self) -> [u8; 12] {
         let mut out = [0u8; 12];

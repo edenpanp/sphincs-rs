@@ -4,7 +4,7 @@
 //! between the main SPHINCS+ signature scheme and the group signature extension.
 
 use crate::adrs::{Adrs, AdrsType};
-use crate::params::{IDX_LEAF_BYTES, IDX_TREE_BYTES, MD_BYTES, M};
+use crate::params::{IDX_LEAF_BYTES, IDX_TREE_BYTES, M, MD_BYTES};
 
 /// Split an M-byte message digest into its three components.
 ///

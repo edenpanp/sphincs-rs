@@ -46,13 +46,13 @@ use std::path::PathBuf;
 /// One record from a NIST KAT `.rsp` file.
 #[derive(Debug)]
 pub struct KatRecord {
-    pub count:  usize,
-    pub mlen:   usize,
-    pub msg:    Vec<u8>,
-    pub pk:     Vec<u8>,
-    pub sk:     Vec<u8>,
-    pub smlen:  usize,
-    pub sm:     Vec<u8>,
+    pub count: usize,
+    pub mlen: usize,
+    pub msg: Vec<u8>,
+    pub pk: Vec<u8>,
+    pub sk: Vec<u8>,
+    pub smlen: usize,
+    pub sm: Vec<u8>,
     // `seed` field is included for completeness but not used in these tests
     // because we derive the key pair directly from (sk_seed, sk_prf, pk_seed)
     // encoded in the `sk` field rather than running the DRBG.
@@ -81,13 +81,13 @@ impl KatRecord {
     pub fn decode_sk(&self) -> ([u8; 32], [u8; 32], [u8; 32], [u8; 32]) {
         assert_eq!(self.sk.len(), 128, "SK must be 128 bytes for SHA2-256s");
         let mut sk_seed = [0u8; 32];
-        let mut sk_prf  = [0u8; 32];
+        let mut sk_prf = [0u8; 32];
         let mut pk_seed = [0u8; 32];
         let mut pk_root = [0u8; 32];
-        sk_seed.copy_from_slice(&self.sk[  0.. 32]);
-        sk_prf .copy_from_slice(&self.sk[ 32.. 64]);
-        pk_seed.copy_from_slice(&self.sk[ 64.. 96]);
-        pk_root.copy_from_slice(&self.sk[ 96..128]);
+        sk_seed.copy_from_slice(&self.sk[0..32]);
+        sk_prf.copy_from_slice(&self.sk[32..64]);
+        pk_seed.copy_from_slice(&self.sk[64..96]);
+        pk_root.copy_from_slice(&self.sk[96..128]);
         (sk_seed, sk_prf, pk_seed, pk_root)
     }
 
@@ -102,7 +102,7 @@ impl KatRecord {
         assert_eq!(self.pk.len(), 64, "PK must be 64 bytes for SHA2-256s");
         let mut pk_seed = [0u8; 32];
         let mut pk_root = [0u8; 32];
-        pk_seed.copy_from_slice(&self.pk[ 0..32]);
+        pk_seed.copy_from_slice(&self.pk[0..32]);
         pk_root.copy_from_slice(&self.pk[32..64]);
         (pk_seed, pk_root)
     }
@@ -150,21 +150,17 @@ pub fn parse_rsp(content: &str) -> Vec<KatRecord> {
 }
 
 fn build_record(fields: &HashMap<&str, &str>) -> Option<KatRecord> {
-    let decode_hex = |key: &str| -> Option<Vec<u8>> {
-        hex::decode(fields.get(key)?).ok()
-    };
-    let parse_usize = |key: &str| -> Option<usize> {
-        fields.get(key)?.parse().ok()
-    };
+    let decode_hex = |key: &str| -> Option<Vec<u8>> { hex::decode(fields.get(key)?).ok() };
+    let parse_usize = |key: &str| -> Option<usize> { fields.get(key)?.parse().ok() };
 
     Some(KatRecord {
         count: parse_usize("count")?,
-        mlen:  parse_usize("mlen")?,
+        mlen: parse_usize("mlen")?,
         smlen: parse_usize("smlen")?,
-        msg:   decode_hex("msg")?,
-        pk:    decode_hex("pk")?,
-        sk:    decode_hex("sk")?,
-        sm:    decode_hex("sm")?,
+        msg: decode_hex("msg")?,
+        pk: decode_hex("pk")?,
+        sk: decode_hex("sk")?,
+        sm: decode_hex("sm")?,
     })
 }
 
@@ -204,9 +200,9 @@ sm = aabbccdd0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20d81
         assert_eq!(records.len(), 1, "Should parse exactly 1 record");
         let rec = &records[0];
         assert_eq!(rec.count, 0);
-        assert_eq!(rec.mlen,  33);
+        assert_eq!(rec.mlen, 33);
         assert_eq!(rec.smlen, 36);
-        assert_eq!(rec.pk.len(),  64);
+        assert_eq!(rec.pk.len(), 64);
         assert_eq!(rec.sk.len(), 128);
     }
 
@@ -215,18 +211,23 @@ sm = aabbccdd0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20d81
     fn decode_sk_fields() {
         let mut sk_bytes = [0u8; 128];
         // Fill each 32-byte field with a distinct byte value
-        sk_bytes[ 0.. 32].fill(0x11); // SK.seed
-        sk_bytes[32.. 64].fill(0x22); // SK.prf
-        sk_bytes[64.. 96].fill(0x33); // PK.seed
+        sk_bytes[0..32].fill(0x11); // SK.seed
+        sk_bytes[32..64].fill(0x22); // SK.prf
+        sk_bytes[64..96].fill(0x33); // PK.seed
         sk_bytes[96..128].fill(0x44); // PK.root
 
         let rec = KatRecord {
-            count: 0, mlen: 0, smlen: 0,
-            msg: vec![], pk: vec![0u8; 64], sk: sk_bytes.to_vec(), sm: vec![],
+            count: 0,
+            mlen: 0,
+            smlen: 0,
+            msg: vec![],
+            pk: vec![0u8; 64],
+            sk: sk_bytes.to_vec(),
+            sm: vec![],
         };
         let (sk_seed, sk_prf, pk_seed, pk_root) = rec.decode_sk();
         assert_eq!(sk_seed, [0x11u8; 32]);
-        assert_eq!(sk_prf,  [0x22u8; 32]);
+        assert_eq!(sk_prf, [0x22u8; 32]);
         assert_eq!(pk_seed, [0x33u8; 32]);
         assert_eq!(pk_root, [0x44u8; 32]);
     }
@@ -235,13 +236,22 @@ sm = aabbccdd0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20d81
     #[test]
     fn sm_split_correct() {
         // sig = [0xAA; 4], msg = [0xBB; 3], smlen = 7, mlen = 3
-        let sm = [0xAAu8; 4].iter().chain([0xBBu8; 3].iter()).copied().collect();
+        let sm = [0xAAu8; 4]
+            .iter()
+            .chain([0xBBu8; 3].iter())
+            .copied()
+            .collect();
         let rec = KatRecord {
-            count: 0, mlen: 3, smlen: 7,
-            msg: vec![], pk: vec![], sk: vec![], sm,
+            count: 0,
+            mlen: 3,
+            smlen: 7,
+            msg: vec![],
+            pk: vec![],
+            sk: vec![],
+            sm,
         };
         assert_eq!(rec.signature_bytes(), &[0xAAu8; 4]);
-        assert_eq!(rec.msg_from_sm(),     &[0xBBu8; 3]);
+        assert_eq!(rec.msg_from_sm(), &[0xBBu8; 3]);
     }
 }
 
@@ -268,8 +278,7 @@ mod kat_file_tests {
 
     /// Load and parse the KAT file.
     fn load_kat() -> Vec<KatRecord> {
-        let content = std::fs::read_to_string(kat_file_path())
-            .expect("Failed to read KAT file");
+        let content = std::fs::read_to_string(kat_file_path()).expect("Failed to read KAT file");
         parse_rsp(&content)
     }
 
@@ -289,7 +298,10 @@ mod kat_file_tests {
         }
 
         let records = load_kat();
-        assert!(!records.is_empty(), "KAT file must contain at least one record");
+        assert!(
+            !records.is_empty(),
+            "KAT file must contain at least one record"
+        );
 
         for rec in &records {
             // Decode PK from the KAT record
@@ -298,18 +310,17 @@ mod kat_file_tests {
 
             // The signature bytes are sm[0 .. smlen - mlen]
             let sig_bytes = rec.signature_bytes();
-            let msg       = rec.msg_from_sm();
+            let msg = rec.msg_from_sm();
 
             // Deserialise the signature and verify
             // NOTE: slh_verify_raw takes raw bytes once the serialisation
             // module is implemented.  For now we use the structured path.
-            let result = sphincs_rs::sphincs::slh_verify_raw::<Sha256Hasher>(
-                msg, sig_bytes, &pk,
-            );
+            let result = sphincs_rs::sphincs::slh_verify_raw::<Sha256Hasher>(msg, sig_bytes, &pk);
             assert!(
                 result,
                 "KAT count={} failed verification (sig bytes = {})",
-                rec.count, hex::encode(&sig_bytes[..8]),
+                rec.count,
+                hex::encode(&sig_bytes[..8]),
             );
         }
 
@@ -335,19 +346,28 @@ mod kat_file_tests {
 
         for rec in &records {
             let (sk_seed, sk_prf, pk_seed, pk_root) = rec.decode_sk();
-            let sk = SphincsSK { sk_seed, sk_prf, pk_seed, pk_root };
+            let sk = SphincsSK {
+                sk_seed,
+                sk_prf,
+                pk_seed,
+                pk_root,
+            };
 
-            let msg       = rec.msg_from_sm();
+            let msg = rec.msg_from_sm();
             let sig_bytes = sphincs_rs::sphincs::slh_sign_raw::<Sha256Hasher>(msg, &sk);
-            let expected  = rec.signature_bytes();
+            let expected = rec.signature_bytes();
 
             assert_eq!(
-                sig_bytes.len(), expected.len(),
+                sig_bytes.len(),
+                expected.len(),
                 "KAT count={} signature length mismatch: got {} expected {}",
-                rec.count, sig_bytes.len(), expected.len(),
+                rec.count,
+                sig_bytes.len(),
+                expected.len(),
             );
             assert_eq!(
-                sig_bytes.as_slice(), expected,
+                sig_bytes.as_slice(),
+                expected,
                 "KAT count={} signature bytes mismatch (first 8: {} vs {})",
                 rec.count,
                 hex::encode(&sig_bytes[..8]),

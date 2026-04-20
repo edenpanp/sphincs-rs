@@ -77,7 +77,7 @@ pub const M: usize = MD_BYTES + IDX_TREE_BYTES + IDX_LEAF_BYTES; // = 47
 
 // ── Sanity checks (evaluated at compile time) ─────────────────────────────────
 
-const _: () = assert!(HP == H / D,         "HP must equal H/D");
-const _: () = assert!(WOTS_LEN1 == 64,     "WOTS_LEN1 must be 64 for N=32, W=16");
-const _: () = assert!(WOTS_LEN == 67,      "WOTS_LEN must be 67 for N=32, W=16");
-const _: () = assert!(M == 47,             "M must be 47 for SHA2-256s");
+const _: () = assert!(HP == H / D, "HP must equal H/D");
+const _: () = assert!(WOTS_LEN1 == 64, "WOTS_LEN1 must be 64 for N=32, W=16");
+const _: () = assert!(WOTS_LEN == 67, "WOTS_LEN must be 67 for N=32, W=16");
+const _: () = assert!(M == 47, "M must be 47 for SHA2-256s");

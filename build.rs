@@ -45,11 +45,7 @@ fn xcrun(args: &[&str]) -> Option<String> {
     }
 
     let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if value.is_empty() {
-        None
-    } else {
-        Some(value)
-    }
+    if value.is_empty() { None } else { Some(value) }
 }
 
 fn deployment_target(sdk_version: &str) -> Option<String> {
