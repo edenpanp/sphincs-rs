@@ -1,6 +1,5 @@
 /target/
-/.ln/
-./.ln/
+/.ln
 
 # macOS finder metadata
 .DS_Store
