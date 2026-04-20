@@ -1,367 +1,175 @@
-//! FORS (Forest of Random Subsets) signature implementation.
-//!
-//! FORS is the few-time signature scheme used at the bottom of SPHINCS+.
-//! It signs the `MD_BYTES`-byte FORS portion of the message digest before
-//! passing a commitment up to the hypertree (HT) layer.
-//!
-//! # Structure
-//!
-//! FORS consists of `K` independent binary Merkle trees, each of height `A`
-//! (2^A = T leaves). The private key is K × T secret values; the public key
-//! is all K tree roots compressed into N bytes.
-//!
-//! # Node indexing
-//!
-//! Same block-index convention as XMSS:
-//!   - `fors_node(i, 0)` = leaf at absolute index i (across all K trees)
-//!   - `fors_node(i, z)` = ancestor covering leaves [i·2^z, (i+1)·2^z − 1]
-//!   - Tree j's root = `fors_node(j, A)` (covers its T leaves exclusively)
-//!   - Tree j's leaves span absolute indices [j·T, (j+1)·T − 1]
-//!
-//! # Algorithm references (FIPS 205)
-//!
-//! | Algorithm | Name              | Function here          |
-//! |-----------|-------------------|------------------------|
-//! | Alg. 14   | `fors_SKgen`      | [`fors_sk_gen`]        |
-//! | Alg. 15   | `fors_node`       | [`fors_node`]          |
-//! | Alg. 16   | `fors_sign`       | [`fors_sign`]          |
-//! | Alg. 17   | `fors_PKFromSig`  | [`fors_pk_from_sig`]   |
-//!
-//! # TODO: KAT compliance
-//!
-//! Verify auth-path index computation `(j·T + (idx_j >> l)) ^ 1` against NIST
-//! FIPS 205 KAT vectors. The signing/verification are mutually consistent here.
+use crate::adrs::Adrs;
+use crate::parameters::*;
+use tiny_keccak::{Hasher, Shake};
 
-use crate::adrs::{Adrs, AdrsType};
-use crate::hash::SphincsHasher;
-use crate::params::{A, K, MD_BYTES, N, T};
-
-// ── Public types ──────────────────────────────────────────────────────────────
-
-/// Authentication path for one FORS tree: A sibling nodes (leaf → root).
-pub type ForsAuth = [[u8; N]; A];
-
-/// FORS signature element for a single tree.
-pub struct ForsTreeSig {
-    /// The revealed FORS secret key leaf (= `PRF(pk_seed, sk_seed, ADRS)`).
-    pub sk: [u8; N],
-    /// Merkle authentication path (A sibling nodes, leaf → root).
-    pub auth: ForsAuth,
+fn shake(data: &[u8], out_len: usize) -> Vec<u8>{
+    let mut hasher = Shake::v256();
+    hasher.update(data);
+    let mut out = vec![0u8; out_len];
+    hasher.finalize(&mut out);
+    out
 }
 
-/// Full FORS signature: K independent tree signatures.
-pub struct ForsSig {
-    /// One [`ForsTreeSig`] per FORS tree (length K).
-    pub trees: Vec<ForsTreeSig>,
+//for FORS nodes and key compression
+fn hash(pk_seed: &[u8], adrs: &Adrs, m: &[u8], out_len: usize) -> Vec<u8>{
+    let mut data = b"TREEHASH".to_vec();
+
+    data.extend_from_slice(pk_seed);
+    data.extend_from_slice(&adrs.get_bytes());
+    data.extend_from_slice(m);
+
+    shake(&data, out_len)
 }
 
-// ── Digest decoding ───────────────────────────────────────────────────────────
+fn prf(sk_seed: &[u8], adrs: &Adrs) -> Vec<u8>{
+    let mut data = b"SECRETSEED".to_vec();
 
-/// Decode the FORS portion of the message digest into K leaf indices.
-///
-/// The `MD_BYTES = ⌈K·A/8⌉` bytes are split into K consecutive A-bit
-/// integers (big-endian bit order). Each index selects one leaf in the
-/// corresponding tree, i.e. each is in [0, T = 2^A).
-///
-/// # Example (K=2, A=3)
-///
-/// ```text
-/// md bytes: [0b_110_010_xx, ...]
-///             ^^^  ^^^
-///            idx₀=6  idx₁=2
-/// ```
-fn decode_indices(md: &[u8; MD_BYTES]) -> [usize; K] {
-    let mut indices = [0usize; K];
-    let mut bit_ptr = 0usize; // current bit position in `md` (MSB-first)
+    data.extend_from_slice(sk_seed);
+    data.extend_from_slice(&adrs.get_bytes());
 
-    for idx in indices.iter_mut() {
-        let mut val = 0usize;
-        for _ in 0..A {
-            let byte_pos = bit_ptr / 8;
-            let bit_pos  = 7 - (bit_ptr % 8); // MSB-first within each byte
-            val = (val << 1) | (((md[byte_pos] >> bit_pos) & 1) as usize);
-            bit_ptr += 1;
-        }
-        *idx = val;
+    shake(&data, parameter_length_N)
+}
+
+pub fn fors_treehash(sk_seed: &[u8], s: usize, z: usize, pk_seed: &[u8], mut adrs: Adrs) -> Vec<u8>{
+    if s % (1 << z) != 0{
+        println!("wrong start index: s = {}, z = {}", s, z);
+        panic!("[fors.rs: fors_treehash] start index s error for height z");
     }
 
-    indices
-}
+    let mut stack: Vec<(Vec<u8>, usize)> = Vec::new();
 
-// ── Public API ────────────────────────────────────────────────────────────────
+    for i in 0..(1 << z){
+        adrs.set_tree_height(0);
+        adrs.set_tree_index((s + i) as u32);
 
-/// Derive FORS secret key element at absolute leaf index `idx` (Alg. 14).
-///
-/// ```text
-/// fors_SKgen(SK.seed, PK.seed, ADRS, idx):
-///   ADRS.type = FORS_TREE
-///   ADRS.keypair = outer keypair address  (preserved from caller)
-///   ADRS.tree_height = 0
-///   ADRS.tree_index  = idx  (absolute leaf in the K-tree forest)
-///   return PRF(PK.seed, SK.seed, ADRS)
-/// ```
-pub fn fors_sk_gen<S: SphincsHasher>(
-    sk_seed: &[u8; N],
-    pk_seed: &[u8; N],
-    adrs: &Adrs,
-    idx: usize,
-) -> [u8; N] {
-    let mut sk_adrs = *adrs;
-    sk_adrs.set_type_and_clear(AdrsType::ForsTree);
-    sk_adrs.set_keypair_address(adrs.get_keypair_address());
-    sk_adrs.set_tree_height(0);
-    sk_adrs.set_tree_index(idx as u32);
-    S::prf(pk_seed, sk_seed, &sk_adrs)
-}
+        let sk = prf(sk_seed, &adrs);
+        let mut node = hash(pk_seed, &adrs, &sk, parameter_length_N);
 
-/// Compute FORS node at block-index `i`, height `z` (Alg. 15).
-///
-/// Block-index `i` covers absolute leaves [i·2^z, (i+1)·2^z − 1].
-///
-/// ```text
-/// if z == 0:
-///   sk = fors_SKgen(SK.seed, PK.seed, ADRS, i)
-///   return F(PK.seed, ADRS with height=0 index=i, sk)
-/// else:
-///   left  = fors_node(SK.seed, 2i,   z-1, PK.seed, ADRS)
-///   right = fors_node(SK.seed, 2i+1, z-1, PK.seed, ADRS)
-///   return H(PK.seed, ADRS with height=z index=i, left, right)
-/// ```
-pub fn fors_node<S: SphincsHasher>(
-    sk_seed: &[u8; N],
-    i: usize,
-    z: usize,
-    pk_seed: &[u8; N],
-    adrs: &Adrs,
-) -> [u8; N] {
-    if z == 0 {
-        // Leaf: derive SK, then apply F
-        let sk = fors_sk_gen::<S>(sk_seed, pk_seed, adrs, i);
+        adrs.set_tree_height(1);
+        adrs.set_tree_index((s + i) as u32);
 
-        let mut leaf_adrs = *adrs;
-        leaf_adrs.set_type_and_clear(AdrsType::ForsTree);
-        leaf_adrs.set_keypair_address(adrs.get_keypair_address());
-        leaf_adrs.set_tree_height(0);
-        leaf_adrs.set_tree_index(i as u32);
+        while !stack.is_empty() && stack.last().unwrap().1 == adrs.get_tree_height() as usize{
+            adrs.set_tree_index((adrs.get_tree_index() - 1) / 2);
 
-        return S::f(pk_seed, &leaf_adrs, &sk);
-    }
+            let (stack_node, _) = stack.pop().unwrap();
+            let mut combined = Vec::with_capacity(parameter_length_N * 2);
 
-    let left  = fors_node::<S>(sk_seed, 2 * i,     z - 1, pk_seed, adrs);
-    let right = fors_node::<S>(sk_seed, 2 * i + 1, z - 1, pk_seed, adrs);
+            combined.extend_from_slice(&stack_node);
+            combined.extend_from_slice(&node);
 
-    let mut node_adrs = *adrs;
-    node_adrs.set_type_and_clear(AdrsType::ForsTree);
-    node_adrs.set_keypair_address(adrs.get_keypair_address());
-    node_adrs.set_tree_height(z as u32);
-    node_adrs.set_tree_index(i as u32);
+            node = hash(&pk_seed, &adrs, &combined, parameter_length_N);
 
-    S::h_two(pk_seed, &node_adrs, &left, &right)
-}
-
-/// Generate a FORS signature for message digest `md` (Alg. 16).
-///
-/// For each tree j (0..K):
-///   1. Decode leaf index `idx_j = indices[j]` from `md`.
-///   2. Reveal `SK[j·T + idx_j]` = the secret leaf.
-///   3. Compute the A-node authentication path from that leaf to tree j's root.
-///
-/// The absolute leaf in tree j is `j·T + idx_j`.
-/// The auth node at height l is the sibling of the ancestor of that leaf:
-/// `fors_node(abs_leaf >> (l+1) << (l+1) | (sibling_bit << l), l)`
-/// which simplifies to: sibling block-index = `(abs_leaf >> l) ^ 1`.
-pub fn fors_sign<S: SphincsHasher>(
-    md: &[u8; MD_BYTES],
-    sk_seed: &[u8; N],
-    pk_seed: &[u8; N],
-    adrs: &Adrs,
-) -> ForsSig {
-    let indices = decode_indices(md);
-    let mut trees = Vec::with_capacity(K);
-
-    for j in 0..K {
-        let idx_j    = indices[j];
-        let abs_leaf = j * T + idx_j; // absolute leaf in the K·T forest
-
-        // Reveal the secret key leaf
-        let sk = fors_sk_gen::<S>(sk_seed, pk_seed, adrs, abs_leaf);
-
-        // Build authentication path: sibling block at each height
-        let mut auth = [[0u8; N]; A];
-        for l in 0..A {
-            let sibling_block = (abs_leaf >> l) ^ 1;
-            auth[l] = fors_node::<S>(sk_seed, sibling_block, l, pk_seed, adrs);
+            adrs.set_tree_height(adrs.get_tree_height() + 1);
         }
 
-        trees.push(ForsTreeSig { sk, auth });
+        stack.push((node, adrs.get_tree_height() as usize));
     }
 
-    ForsSig { trees }
+    stack.pop().unwrap().0
 }
 
-/// Recover the FORS public key from a signature (Alg. 17).
-///
-/// For each tree j:
-///   1. Recompute the leaf node from `sk_j` using `F`.
-///   2. Walk the authentication path to recover tree j's root.
-/// Then compress all K roots into a single N-byte public key using `T_K`.
-pub fn fors_pk_from_sig<S: SphincsHasher>(
-    sig: &ForsSig,
-    md: &[u8; MD_BYTES],
-    pk_seed: &[u8; N],
-    adrs: &Adrs,
-) -> [u8; N] {
-    debug_assert_eq!(sig.trees.len(), K, "ForsSig must contain exactly K trees");
+pub fn fors_sign(md: &[u8], sk_seed: &[u8], pk_seed: &[u8], mut adrs: Adrs) -> Vec<Vec<u8>>{
+    if debug_mode{
+        println!("---------------FORS SIGN------------------");
+        println!("message digest bytes: {:?}", md);
+    }
 
-    let indices = decode_indices(md);
-    let mut roots = [[0u8; N]; K];
+    let mut sig_fors = Vec::new();
 
-    for j in 0..K {
-        let idx_j    = indices[j];
-        let abs_leaf = j * T + idx_j;
-        let tree_sig = &sig.trees[j];
+    for i in 0..fors_trees_number{
+        let idx = get_idx_from_digest(&md, i);
 
-        // Step 1: leaf node = F(pk_seed, ADRS, sk_j)
-        let mut leaf_adrs = *adrs;
-        leaf_adrs.set_type_and_clear(AdrsType::ForsTree);
-        leaf_adrs.set_keypair_address(adrs.get_keypair_address());
-        leaf_adrs.set_tree_height(0);
-        leaf_adrs.set_tree_index(abs_leaf as u32);
-        let mut node = S::f(pk_seed, &leaf_adrs, &tree_sig.sk);
+        if debug_mode{
+            println!("tree {} -> idx {}", i, idx);
+        }
 
-        // Step 2: walk up the authentication path
-        let mut node_adrs = *adrs;
-        node_adrs.set_type_and_clear(AdrsType::ForsTree);
-        node_adrs.set_keypair_address(adrs.get_keypair_address());
-        node_adrs.set_tree_index(abs_leaf as u32);
+        adrs.set_tree_height(0);
+        adrs.set_tree_index((i * fors_leaves + idx) as u32);
 
-        for l in 0..A {
-            node_adrs.set_tree_height((l + 1) as u32);
+    //compute fors sk
+        let leaf_sk = prf(sk_seed, &adrs);
 
-            if (abs_leaf >> l) & 1 == 0 {
-                // Current is left child → parent block = current / 2
-                let parent = node_adrs.get_tree_index() / 2;
-                node_adrs.set_tree_index(parent);
-                node = S::h_two(pk_seed, &node_adrs, &node, &tree_sig.auth[l]);
-            } else {
-                // Current is right child → parent block = (current − 1) / 2
-                let parent = (node_adrs.get_tree_index() - 1) / 2;
-                node_adrs.set_tree_index(parent);
-                node = S::h_two(pk_seed, &node_adrs, &tree_sig.auth[l], &node);
+        sig_fors.push(leaf_sk);
+
+        //compute path
+        for j in 0..fors_tree_height{
+            let mut s = idx / (1 << j); //get block index in j layer
+            //get sibling index
+            if s % 2 == 1{
+                s -= 1;
             }
-        }
+            else{
+                s += 1;
+            }
 
-        roots[j] = node;
+            let node = fors_treehash(sk_seed, i * fors_leaves + s * (1 << j), j, pk_seed, adrs);
+            sig_fors.push(node);
+        }
     }
 
-    // Compress K roots into the FORS public key
-    let mut pk_adrs = *adrs;
-    pk_adrs.set_type_and_clear(AdrsType::ForsPk);
-    pk_adrs.set_keypair_address(adrs.get_keypair_address());
-    S::t_l(pk_seed, &pk_adrs, &roots)
+    sig_fors
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+//get FORS root -> pk
+pub fn fors_pk_from_sig(sig_fors: Vec<Vec<u8>>, md: Vec<u8>, pk_seed: Vec<u8>, mut adrs: Adrs) -> Vec<u8>{
+    //-------------------MODIFICATION-------------------
+    //split each [sk, auth path...]
+    let step = fors_tree_height + 1;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::hash::RawSha256;
-    use rand::{RngCore, rngs::OsRng};
+    let mut roots = Vec::with_capacity(fors_trees_number * parameter_length_N);
 
-    fn random_n() -> [u8; N] {
-        let mut b = [0u8; N];
-        OsRng.fill_bytes(&mut b);
-        b
-    }
+    for i in 0..fors_trees_number{
+        let idx = get_idx_from_digest(&md, i);
+        let sk = &sig_fors[i * step];
 
-    fn random_md() -> [u8; MD_BYTES] {
-        let mut b = [0u8; MD_BYTES];
-        OsRng.fill_bytes(&mut b);
-        b
-    }
+        adrs.set_tree_height(0);
+        adrs.set_tree_index((i * fors_leaves + idx) as u32);
 
-    /// decode_indices round-trips: same md always gives same indices.
-    #[test]
-    fn decode_indices_deterministic() {
-        let md = random_md();
-        assert_eq!(decode_indices(&md), decode_indices(&md));
-    }
+        let mut node = hash(&pk_seed, &adrs, sk, parameter_length_N);
 
-    /// All decoded indices must be in [0, T).
-    #[test]
-    fn decode_indices_range() {
-        for _ in 0..10 {
-            let md = random_md();
-            for idx in decode_indices(&md) {
-                assert!(idx < T, "index {idx} out of range [0, {T})");
+        for j in 0..fors_tree_height{
+            let auth_node = &sig_fors[i * step + 1 + j];
+
+            adrs.set_tree_height((j + 1) as u32);
+
+            let mut combined = Vec::with_capacity(parameter_length_N * 2);
+            //left node: node + auth
+            if (idx / (1 << j)) % 2 == 0{
+                adrs.set_tree_index(adrs.get_tree_index() / 2);
+                combined.extend_from_slice(&node);
+                combined.extend_from_slice(auth_node);
             }
+            //right node: auth + node
+            else{
+                adrs.set_tree_index((adrs.get_tree_index() - 1) / 2);
+                combined.extend_from_slice(auth_node);
+                combined.extend_from_slice(&node);
+            }
+            node = hash(&pk_seed, &adrs, &combined, parameter_length_N);
+        }
+
+        roots.extend_from_slice(&node);
+    }
+
+    let mut fors_pk_adrs = adrs;
+    fors_pk_adrs.set_type(Adrs::fors_roots);
+    fors_pk_adrs.set_key_pair_address(adrs.get_key_pair_address());
+
+    hash(&pk_seed, &fors_pk_adrs, &roots, parameter_length_N)
+}
+
+//digest is interpreted as 'fors_trees_number' chunks, each chunk of size 'fors_tree_height' bits.
+fn get_idx_from_digest(md: &[u8], i: usize) -> usize{
+    let bit_offset = (fors_trees_number - 1 - i) * fors_tree_height;
+    let byte_offset = bit_offset / 8;
+    let bit_in_byte = bit_offset % 8;
+
+    let mut val = 0u64;
+    for j in 0..((fors_tree_height + 7) / 8 + 1){
+        if byte_offset + j < md.len(){
+            val = (val << 8) | (md[md.len() - 1 - (byte_offset + j)] as u64);
         }
     }
 
-    /// fors_node(j, A) for each j = independent computation of tree j's root.
-    #[test]
-    fn fors_tree_roots_are_distinct() {
-        let (sk_seed, pk_seed) = (random_n(), random_n());
-        let mut adrs = Adrs::new(AdrsType::ForsTree);
-        adrs.set_keypair_address(0);
-
-        let roots: Vec<_> = (0..K)
-            .map(|j| fors_node::<RawSha256>(&sk_seed, j, A, &pk_seed, &adrs))
-            .collect();
-
-        // All roots should be distinct with overwhelming probability
-        for i in 0..K {
-            for j in (i + 1)..K {
-                assert_ne!(roots[i], roots[j], "trees {i} and {j} have the same root");
-            }
-        }
-    }
-
-    /// Full FORS sign → pk_from_sig round-trip.
-    #[test]
-    fn fors_sign_verify_roundtrip() {
-        let (sk_seed, pk_seed) = (random_n(), random_n());
-        let md = random_md();
-
-        let mut adrs = Adrs::new(AdrsType::ForsTree);
-        adrs.set_keypair_address(0);
-
-        // Compute FORS PK directly (K tree roots → T_K)
-        let roots: [[u8; N]; K] = {
-            let v: Vec<_> = (0..K)
-                .map(|j| fors_node::<RawSha256>(&sk_seed, j, A, &pk_seed, &adrs))
-                .collect();
-            let mut arr = [[0u8; N]; K];
-            arr.copy_from_slice(&v);
-            arr
-        };
-        let mut pk_adrs = adrs;
-        pk_adrs.set_type_and_clear(AdrsType::ForsPk);
-        pk_adrs.set_keypair_address(adrs.get_keypair_address());
-        let fors_pk_direct = RawSha256::t_l(&pk_seed, &pk_adrs, &roots);
-
-        // Sign and recover PK
-        let sig = fors_sign::<RawSha256>(&md, &sk_seed, &pk_seed, &adrs);
-        let fors_pk_recovered = fors_pk_from_sig::<RawSha256>(&sig, &md, &pk_seed, &adrs);
-
-        assert_eq!(fors_pk_direct, fors_pk_recovered, "FORS PK recovery failed");
-    }
-
-    /// A different message digest must produce a different (wrong) recovered PK.
-    #[test]
-    fn fors_wrong_digest_fails() {
-        let (sk_seed, pk_seed) = (random_n(), random_n());
-        let md    = random_md();
-        let wrong = random_md();
-
-        let mut adrs = Adrs::new(AdrsType::ForsTree);
-        adrs.set_keypair_address(0);
-
-        let sig          = fors_sign::<RawSha256>(&md, &sk_seed, &pk_seed, &adrs);
-        let pk_correct   = fors_pk_from_sig::<RawSha256>(&sig, &md, &pk_seed, &adrs);
-        let pk_wrong     = fors_pk_from_sig::<RawSha256>(&sig, &wrong, &pk_seed, &adrs);
-
-        assert_ne!(pk_correct, pk_wrong, "FORS accepted wrong digest");
-    }
+    ((val >> bit_in_byte) as usize) & (fors_leaves - 1)
 }

@@ -1,26 +1,12 @@
 [package]
-name = "sphincs-rs"
-version = "0.1.0"
-edition = "2024"
-
-[features]
-# Expose RawSha256 and other test utilities to integration tests and benchmarks.
-test-utils = []
-# Enable Rayon-based parallel leaf generation (optimisation 1).
-parallel = ["dep:rayon"]
+name = "comp6453_rust_sphincs"        
+version = "0.1.0"                
+edition = "2024"                  
 
 [dependencies]
-hex   = "0.4.3"
-rand  = "0.8"
-sha2  = "0.10.9"
-rayon = { version = "1.10", optional = true }
+# tiny-keccak SHAKE256
+tiny-keccak = { version = "2.0", features = ["shake"] }
 
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-hex       = "0.4.3"
-rand      = "0.8"
+rand = "0.8"
 
-[[bench]]
-name              = "sphincs_bench"
-harness           = false
-required-features = ["test-utils"]
+rand_core = "0.6"
