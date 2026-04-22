@@ -4,7 +4,7 @@
 **OS:** macOS 26.4.1  
 **Rust:** 1.94.1
 
-These results were collected from the last working build before the current merge conflicts were introduced. The benchmark definitions are in [`benches/sphincs_bench.rs`](../benches/sphincs_bench.rs), but that file currently also contains unresolved conflicts.
+These results were collected from the last working benchmark run. The benchmark definitions are in [`benches/sphincs_bench.rs`](../benches/sphincs_bench.rs).
 
 ---
 
@@ -107,3 +107,5 @@ A few quick observations on this table:
 - The hypertree part stays the same because only the FORS parameters change here.
 - The smaller and faster variants trade off signature size and FORS cost in different ways.
 - The standard choice sits in the middle, which is why it is a sensible default.
+
+For the separate baseline-vs-alpha experiment with 29,792-byte and 27,232-byte signatures, see [ALPHA_COMPARISON_REPORT.md](./ALPHA_COMPARISON_REPORT.md).

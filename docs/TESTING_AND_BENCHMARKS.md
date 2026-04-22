@@ -49,6 +49,8 @@ cargo bench --features test-utils -- --baseline before
 
 The benchmark groups are `keygen`, `sign`, `verify`, `xmss_root`, `wots_keygen`, `fors_sign`, `alpha_comparison`, and `group`. If the goal is just to isolate the XMSS improvement, `xmss_root` is the cleanest one.
 
+For the separate baseline-vs-alpha experiment, see [ALPHA_COMPARISON_REPORT.md](./ALPHA_COMPARISON_REPORT.md).
+
 ---
 
 ## KAT path fix
@@ -64,14 +66,14 @@ After that, the KAT verification and re-signing checks can run normally.
 
 ---
 
-## Current build issue
+## Current merge state
 
-There are currently unresolved merge conflicts blocking compilation:
+The previous unresolved merge-conflict markers have been cleaned from:
 
 | File | Problem |
 |------|---------|
-| `src/group.rs` | unresolved merge-conflict markers |
-| `src/xmss.rs` | unresolved merge-conflict markers |
-| `benches/sphincs_bench.rs` | unresolved merge-conflict markers in several benchmark functions |
+| `src/group.rs` | group-signature API conflict resolved |
+| `src/xmss.rs` | XMSS baseline/fast conflict resolved |
+| `benches/sphincs_bench.rs` | benchmark duplicate/conflict blocks resolved |
 
-These conflicts need to be fixed before the normal `cargo` commands work again.
+The latest lightweight compile check was `cargo check --features test-utils`.
