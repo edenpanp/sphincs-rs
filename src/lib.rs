@@ -1,4 +1,4 @@
-///! # sphincs-rs
+//! # sphincs-rs
 //!
 //! A SPHINCS+ (SLH-DSA) implementation in Rust.
 //!
@@ -37,37 +37,25 @@
 //!
 //! ```rust,ignore
 //! use sphincs_rs::group::{
-//!     attach_certificates,
-//!     certify_key_batch,
-//!     generate_member_key_batch,
+//!     derive_member_key,
 //!     group_keygen,
 //!     group_sign,
 //!     group_verify,
 //! };
 //! use sphincs_rs::hash::Sha256Hasher;
 //!
-//! // member locally generate a batch of one-time WOTS+ keys
-//! let (mut manager, gpk) = group_keygen::<Sha256Hasher>();
-//! let batch = generate_member_key_batch::<Sha256Hasher>(0, 8).unwrap();
-//! let request = batch.certification_request();
+//! let (manager, gpk) = group_keygen::<Sha256Hasher>();
+//! let member_sk = derive_member_key(&manager, 0);
 //!
-//! // manager signs those public keys (issue certs)
-//! let certificates = certify_key_batch::<Sha256Hasher>(&mut manager, &request).unwrap();
-//! let mut member_sk = attach_certificates(batch, certificates).unwrap();
+//! let sig = group_sign::<Sha256Hasher>(b"hello group", &member_sk);
 //!
-//! // when signing, just pick one unused key + cert
-//! let sig = group_sign::<Sha256Hasher>(b"hello group", &mut member_sk).unwrap();
-//!
-//! // verify needs to pass two checks:
-//! // 1. manager cert is valid
-//! // 2. WOTS signature is valid
 //! assert!(group_verify::<Sha256Hasher>(b"hello group", &sig, &gpk));
 //! ```
 //!
-//! current group module uses a cert-based design:
-//! - member pre-generates one-time keys
-//! - manager signs those public keys (no private key access)
-//! - actual signing consumes one certified key
+//! current group module uses a top-level XMSS tree as the group public key:
+//! - manager owns the tree seed and derives per-member signing keys
+//! - member signatures verify under the group public key
+//! - manager can identify the member index for a valid group signature
 //!
 //! ## Optimisations
 //!
