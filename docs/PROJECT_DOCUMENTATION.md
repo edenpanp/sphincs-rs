@@ -83,6 +83,9 @@ More detail is in [TEST_RESULTS.md](./TEST_RESULTS.md).
 
 In [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md).
 
+The baseline-vs-alpha size and runtime comparison is documented in
+[ALPHA_COMPARISON_REPORT.md](./ALPHA_COMPARISON_REPORT.md).
+
 ---
 
 ## Group signature extension
@@ -97,6 +100,6 @@ In [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md).
 
 **Signing latency.** Even with the fast path and parallelism, signing is still relatively slow compared with traditional signature schemes.
 
-**Build state.** Right now the repository has unresolved merge conflicts, including in `src/group.rs`, `src/xmss.rs`, and `benches/sphincs_bench.rs`, so the current tree does not compile until those are fixed.
+**Build state.** The previous merge-conflict markers in `src/group.rs`, `src/xmss.rs`, and `benches/sphincs_bench.rs` have been cleaned up.
 
 **Parameter coverage.** The main testing and benchmark results focus on the SHA2-256s variant. Other parameter files exist, but they were not explored to the same depth in this project.

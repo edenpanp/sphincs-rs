@@ -3,13 +3,13 @@
 **Machine:** MacBook Pro, Apple M2 Max, macOS 26.4.1, rustc 1.94.1 (Homebrew)  
 **Branch:** `docs-Aaron`  
 **Where run:** locally on the development machine  
-**Last clean run:** before the current merge conflicts were introduced
+**Last full test run:** before the merge-conflict cleanup
 
 ---
 
 ## Build note
 
-There are currently unresolved merge conflicts in `src/group.rs`, `src/xmss.rs`, and `benches/sphincs_bench.rs`, so the repository does not compile in its current state. The results below are from the last clean build before those conflicts showed up.
+The previous merge-conflict markers in `src/group.rs`, `src/xmss.rs`, and `benches/sphincs_bench.rs` have been cleaned up. The results below are still the recorded test results from the last full clean run; the latest lightweight compile check was `cargo check --features test-utils`.
 
 ```bash
 cargo check
@@ -71,6 +71,8 @@ A few of these are worth calling out:
 - `integration_bit_flip_rejection` samples tampering in different parts of the signature and confirms verification fails
 - `sig_bytes_constant_correct` independently recomputes the expected signature size from the parameters
 - `integration_multiple_keypairs` checks that signatures only verify under the correct public key
+
+The separate baseline-vs-alpha integration and timing comparison is documented in [ALPHA_COMPARISON_REPORT.md](./ALPHA_COMPARISON_REPORT.md).
 
 ---
 
