@@ -170,7 +170,7 @@ fn sig_bytes_constant_correct() {
 #[test]
 fn group_root_helper_matches_keygen() {
     let (manager, gpk) = group_keygen::<RawSha256>();
-    let again = compute_group_root::<RawSha256>(&manager.sk_seed, &manager.pk_seed);
+    let again = compute_group_root::<RawSha256>(&manager.master_seed, &manager.pk_seed);
     assert_eq!(again, manager.group_root);
     assert_eq!(again, gpk.group_root);
 }
@@ -179,7 +179,7 @@ fn group_root_helper_matches_keygen() {
 #[test]
 fn group_search_r_hits_target() {
     let (manager, _gpk) = group_keygen::<RawSha256>();
-    let m = derive_member_key(&manager, 3);
+    let m = derive_member_key::<RawSha256>(&manager, 3);
     let msg = b"group randomizer helper integration";
 
     let r = search_r::<RawSha256>(msg, &m.sk_prf, &m.pk_seed, &m.group_root, m.member_index as u64)

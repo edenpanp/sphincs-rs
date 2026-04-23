@@ -92,6 +92,13 @@ The baseline-vs-alpha size and runtime comparison is documented in
 
 `src/group.rs` contains an experimental group-signature layer built on top of the SPHINCS+ implementation, based on [ePrint 2025/760](https://eprint.iacr.org/2025/760.pdf).
 
+In the current revision, the public API hides the signing seed inside each
+member key structure so the obvious exposed-manager-secret misuse from the
+earlier prototype is removed. The group API now supports public verification,
+manager-side opening of the signer index, and a minimal manager-side
+revocation-policy check. It still should not be described as a full DGSP
+implementation.
+
 ---
 
 ## Limitations

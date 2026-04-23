@@ -334,7 +334,8 @@ criterion_main!(benches);
 
 fn bench_group(c: &mut Criterion) {
     use sphincs_rs::group::{
-        derive_member_key, group_identify_member, group_keygen, group_sign, group_verify,
+        GroupRevocationList, derive_member_key, group_keygen, group_open, group_sign,
+        group_verify, group_verify_not_revoked,
     };
 
     let mut g = c.benchmark_group("group");
@@ -350,7 +351,7 @@ fn bench_group(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let (mgr, _gpk) = group_keygen::<RawSha256>();
-                let msk = derive_member_key(&mgr, 0);
+                let msk = derive_member_key::<RawSha256>(&mgr, 0);
                 msk
             },
             |msk| group_sign::<RawSha256>(b"bench message", &msk),
@@ -363,7 +364,7 @@ fn bench_group(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let (mgr, gpk) = group_keygen::<RawSha256>();
-                let msk = derive_member_key(&mgr, 0);
+                let msk = derive_member_key::<RawSha256>(&mgr, 0);
                 let sig = group_sign::<RawSha256>(b"bench message", &msk);
                 (sig, gpk)
             },
@@ -372,16 +373,39 @@ fn bench_group(c: &mut Criterion) {
         )
     });
 
-    // group_identify: linear scan over all members (O(M) WOTS+ verifications)
-    g.bench_function("identify/RawSha256", |b| {
+    // group_open: manager-side opening by scanning candidate member leaves.
+    g.bench_function("open/RawSha256", |b| {
         b.iter_batched(
             || {
                 let (mgr, _gpk) = group_keygen::<RawSha256>();
-                let msk = derive_member_key(&mgr, 7);
+                let msk = derive_member_key::<RawSha256>(&mgr, 7);
                 let sig = group_sign::<RawSha256>(b"identify bench", &msk);
                 (mgr, sig)
             },
-            |(mgr, sig)| group_identify_member::<RawSha256>(b"identify bench", &sig, &mgr),
+            |(mgr, sig)| group_open::<RawSha256>(b"identify bench", &sig, &mgr),
+            BatchSize::SmallInput,
+        )
+    });
+
+    // manager-side revocation policy check.
+    g.bench_function("verify_not_revoked/RawSha256", |b| {
+        b.iter_batched(
+            || {
+                let (mgr, gpk) = group_keygen::<RawSha256>();
+                let msk = derive_member_key::<RawSha256>(&mgr, 7);
+                let sig = group_sign::<RawSha256>(b"identify bench", &msk);
+                let revocations = GroupRevocationList::new();
+                (mgr, gpk, sig, revocations)
+            },
+            |(mgr, gpk, sig, revocations)| {
+                group_verify_not_revoked::<RawSha256>(
+                    b"identify bench",
+                    &sig,
+                    &gpk,
+                    &mgr,
+                    &revocations,
+                )
+            },
             BatchSize::SmallInput,
         )
     });

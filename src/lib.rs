@@ -39,23 +39,25 @@
 //! use sphincs_rs::group::{
 //!     derive_member_key,
 //!     group_keygen,
+//!     group_open,
 //!     group_sign,
 //!     group_verify,
 //! };
 //! use sphincs_rs::hash::Sha256Hasher;
 //!
 //! let (manager, gpk) = group_keygen::<Sha256Hasher>();
-//! let member_sk = derive_member_key(&manager, 0);
+//! let member_sk = derive_member_key::<Sha256Hasher>(&manager, 0);
 //!
 //! let sig = group_sign::<Sha256Hasher>(b"hello group", &member_sk);
 //!
 //! assert!(group_verify::<Sha256Hasher>(b"hello group", &sig, &gpk));
+//! assert_eq!(group_open::<Sha256Hasher>(b"hello group", &sig, &manager), Some(0));
 //! ```
 //!
 //! current group module uses a top-level XMSS tree as the group public key:
-//! - manager owns the tree seed and derives per-member signing keys
+//! - manager owns the tree seed and distributes member signing material
 //! - member signatures verify under the group public key
-//! - manager can identify the member index for a valid group signature
+//! - manager can open the signer index for a valid group signature
 //!
 //! ## Optimisations
 //!

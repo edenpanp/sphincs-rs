@@ -65,7 +65,7 @@ cargo bench --features "test-utils parallel"
 | sign/fast/RawSha256 | ~657 ms | ~267–348 ms | **2–3×** |
 | verify/RawSha256 | ~900 µs | ~557–803 µs | **1.3×** |
 | xmss_root/fast/RawSha256 | ~50 ms | ~6 ms | **~8×** |
-| group/identify | ~7–10 ms | ~4.8–5.0 ms | **1.5×** |
+| group/open | ~7–10 ms | ~4.8–5.0 ms | **1.5×** |
 
 Key generation gets the biggest parallel win because the XMSS leaves can be computed independently. Rayon distributes that work very well, so most of the headline speedup comes from here.
 
@@ -73,7 +73,7 @@ Signing only improves by around 2 to 3 times because the hypertree still has seq
 
 Verification barely changes because it does not rebuild trees. It just walks the authentication paths already stored in the signature.
 
-`group/identify` improves a little, but not dramatically.
+`group/open` improves a little, but not dramatically.
 
 ---
 

@@ -86,4 +86,4 @@ The demo is designed to show more than a happy-path signature: it explains the
 post-quantum motivation, prints parameters and concrete sizes, verifies a valid
 signature, rejects a modified message, rejects a modified signature, checks raw
 serialisation, and demonstrates the experimental group verification plus
-manager-identification workflow.
+manager-side opening and a minimal revocation-policy workflow.

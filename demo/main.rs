@@ -2,7 +2,8 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use sphincs_rs::group::{
-    derive_member_key, group_identify_member, group_keygen, group_sign, group_verify,
+    GroupRevocationList, derive_member_key, group_keygen, group_open, group_sign,
+    group_verify, group_verify_not_revoked,
 };
 use sphincs_rs::hash::{RawSha256, Sha256Hasher, SphincsHasher};
 use sphincs_rs::params::{A, D, H, HP, K, N, W, WOTS_LEN};
@@ -55,7 +56,7 @@ fn print_header() {
     println!("  2. rejection after message and signature tampering");
     println!("  3. raw signature size and parameter choices");
     println!("  4. optimised signing path used by this implementation");
-    println!("  5. experimental group-signature verify + manager identify");
+    println!("  5. experimental group-signature verify + manager open/revoke check");
     println!("============================================================");
     println!("Recommended command:");
     println!("  cargo run --release --example demo");
@@ -165,17 +166,23 @@ fn run_group_demo<S: SphincsHasher>(message: &[u8]) {
     println!("Part B - Experimental Group Extension");
     println!("------------------------------------------------------------");
     println!("Scope note: this is an experimental group-style extension,");
-    println!("not the full DGSP protocol with join, revoke, open and judge.");
+    println!("not the full DGSP protocol with join, public revocation, judge,");
+    println!("and certificate lifecycle support.");
     println!("Backend: RawSha256 demo backend for live demonstration speed.");
 
     let member_index = 7u32;
     let (setup_time, (manager, gpk)) = timed(group_keygen::<S>);
-    let member_sk = derive_member_key(&manager, member_index);
+    let member_sk = derive_member_key::<S>(&manager, member_index);
 
     let (sign_time, group_sig) = timed(|| group_sign::<S>(message, &member_sk));
     let (verify_time, group_valid) = timed(|| group_verify::<S>(message, &group_sig, &gpk));
-    let (identify_time, identified) =
-        timed(|| group_identify_member::<S>(message, &group_sig, &manager));
+    let (open_time, opened) = timed(|| group_open::<S>(message, &group_sig, &manager));
+    let mut revocations = GroupRevocationList::new();
+    let verify_before_revoke =
+        group_verify_not_revoked::<S>(message, &group_sig, &gpk, &manager, &revocations);
+    revocations.revoke(member_index);
+    let verify_after_revoke =
+        group_verify_not_revoked::<S>(message, &group_sig, &gpk, &manager, &revocations);
 
     println!("Group setup capacity: {} members", manager.max_members);
     println!("Chosen signer: member #{member_index}");
@@ -187,13 +194,21 @@ fn run_group_demo<S: SphincsHasher>(message: &[u8]) {
         fmt_duration(verify_time)
     );
     println!(
-        "Manager identifies signer: {} ({})",
-        match identified {
+        "Manager opens signer: {} ({})",
+        match opened {
             Some(idx) if idx == member_index => format!("PASS -> member #{idx}"),
             Some(idx) => format!("FAIL -> member #{idx}"),
             None => "FAIL -> no member found".to_string(),
         },
-        fmt_duration(identify_time)
+        fmt_duration(open_time)
+    );
+    println!(
+        "Manager verify_not_revoked before revoke: {}",
+        pass(verify_before_revoke)
+    );
+    println!(
+        "Manager verify_not_revoked after revoke: {}",
+        pass(!verify_after_revoke)
     );
 }
 

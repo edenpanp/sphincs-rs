@@ -1,6 +1,8 @@
 //! group signature experiment using the existing SPHINCS+ code.
 //! one group is one top XMSS tree, so with HP=8 this gives up to 256 members.
-//! roughly follows eprint 2025/760 but only keeps sign/verify/identify.
+//! roughly follows eprint 2025/760 but only keeps sign/verify/open/revocation.
+
+use std::collections::BTreeSet;
 
 use rand::{RngCore, rngs::OsRng};
 
@@ -15,11 +17,11 @@ use crate::xmss;
 /// The group manager's master key material.
 ///
 /// The manager distributes individual [`MemberSK`]s from this.
-/// `sk_seed` is sensitive — compromise of `sk_seed` allows forging signatures
+/// `master_seed` is sensitive — compromise of it allows forging signatures
 /// for any member.
 pub struct GroupManagerKey {
     /// Shared master secret (derives every member leaf).
-    pub sk_seed: [u8; N],
+    pub master_seed: [u8; N],
     /// Public seed (shared with all members and verifiers).
     pub pk_seed: [u8; N],
     /// Pre-computed group root (top-level XMSS tree root = group PK.root).
@@ -31,13 +33,19 @@ pub struct GroupManagerKey {
 /// A single member's secret key.
 ///
 /// Derived by the manager and distributed to member `index`.
-/// Members do NOT learn `sk_seed` of other members because only the
-/// manager holds `sk_seed`; the member receives only what they need
-/// to sign at their own leaf.
+/// This API hides the signing seed inside the member key structure so callers
+/// cannot trivially rewrite the member index and impersonate another member
+/// through the public API. It is still an experimental design, not a full
+/// cryptographically isolated member-key architecture.
 #[derive(Clone)]
 pub struct MemberSK {
-    /// Shared master secret — needed to compute WOTS+ leaf at `index`.
-    pub sk_seed: [u8; N],
+    /// Hidden signing seed used by the current XMSS-root construction.
+    ///
+    /// In this experimental design the member retains the signing seed needed
+    /// to authenticate against the shared group root, but the field is not
+    /// public so outside callers cannot trivially mutate the member index while
+    /// reusing exposed manager material.
+    signing_seed: [u8; N],
     /// Per-member PRF key for message randomness.
     /// Each member has an independent `sk_prf` so their R values are
     /// unlinkable across signatures.
@@ -57,6 +65,34 @@ pub struct MemberSK {
 pub struct GroupPK {
     pub pk_seed: [u8; N],
     pub group_root: [u8; N],
+}
+
+/// Manager-side revocation list for the experimental group extension.
+///
+/// This is intentionally lightweight: public verifiers still call
+/// [`group_verify`], while manager-side policy checks can additionally require
+/// `group_verify_not_revoked`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GroupRevocationList {
+    revoked_members: BTreeSet<u32>,
+}
+
+impl GroupRevocationList {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn revoke(&mut self, member_index: u32) -> bool {
+        self.revoked_members.insert(member_index)
+    }
+
+    pub fn unrevoke(&mut self, member_index: u32) -> bool {
+        self.revoked_members.remove(&member_index)
+    }
+
+    pub fn is_revoked(&self, member_index: u32) -> bool {
+        self.revoked_members.contains(&member_index)
+    }
 }
 
 impl GroupPK {
@@ -137,15 +173,15 @@ pub fn search_r<S: SphincsHasher>(
 ///
 /// The manager calls this once and distributes member keys via [`derive_member_key`].
 pub fn group_keygen<S: SphincsHasher>() -> (GroupManagerKey, GroupPK) {
-    let mut sk_seed = [0u8; N];
+    let mut master_seed = [0u8; N];
     let mut pk_seed = [0u8; N];
-    OsRng.fill_bytes(&mut sk_seed);
+    OsRng.fill_bytes(&mut master_seed);
     OsRng.fill_bytes(&mut pk_seed);
 
-    let group_root = compute_group_root::<S>(&sk_seed, &pk_seed);
+    let group_root = compute_group_root::<S>(&master_seed, &pk_seed);
 
     let manager = GroupManagerKey {
-        sk_seed,
+        master_seed,
         pk_seed,
         group_root,
         max_members: 1 << HP,
@@ -162,7 +198,7 @@ pub fn group_keygen<S: SphincsHasher>() -> (GroupManagerKey, GroupPK) {
 /// `index` must be in `0..manager.max_members`.
 /// Each member gets an independent `sk_prf` sampled freshly so their
 /// per-message randomness is unlinkable.
-pub fn derive_member_key(manager: &GroupManagerKey, index: u32) -> MemberSK {
+pub fn derive_member_key<S: SphincsHasher>(manager: &GroupManagerKey, index: u32) -> MemberSK {
     assert!(
         (index as usize) < manager.max_members,
         "member index {index} exceeds max_members {}",
@@ -172,7 +208,7 @@ pub fn derive_member_key(manager: &GroupManagerKey, index: u32) -> MemberSK {
     OsRng.fill_bytes(&mut sk_prf);
 
     MemberSK {
-        sk_seed: manager.sk_seed,
+        signing_seed: manager.master_seed,
         sk_prf,
         pk_seed: manager.pk_seed,
         group_root: manager.group_root,
@@ -208,9 +244,15 @@ pub fn group_sign<S: SphincsHasher>(msg: &[u8], sk: &MemberSK) -> SphincsSignatu
     let idx_leaf = sk.member_index as u64;
 
     let f_adrs = fors_adrs(idx_tree, idx_leaf);
-    let fors_sig = fors::fors_sign::<S>(&md, &sk.sk_seed, &sk.pk_seed, &f_adrs);
+    let fors_sig = fors::fors_sign::<S>(&md, &sk.signing_seed, &sk.pk_seed, &f_adrs);
     let fors_pk = fors::fors_pk_from_sig::<S>(&fors_sig, &md, &sk.pk_seed, &f_adrs);
-    let ht_sig = ht::ht_sign_fast::<S>(&fors_pk, &sk.sk_seed, &sk.pk_seed, idx_tree, idx_leaf);
+    let ht_sig = ht::ht_sign_fast::<S>(
+        &fors_pk,
+        &sk.signing_seed,
+        &sk.pk_seed,
+        idx_tree,
+        idx_leaf,
+    );
 
     SphincsSignature {
         r,
@@ -235,11 +277,44 @@ pub fn group_verify_raw<S: SphincsHasher>(msg: &[u8], sig_bytes: &[u8], gpk: &Gr
     }
 }
 
+/// Manager-side opening algorithm for the experimental group extension.
+///
+/// This returns the identified signer index if the signature is valid for some
+/// member leaf under the current group manager state.
+pub fn group_open<S: SphincsHasher>(
+    msg: &[u8],
+    sig: &SphincsSignature,
+    manager: &GroupManagerKey,
+) -> Option<u32> {
+    group_identify_member::<S>(msg, sig, manager)
+}
+
+/// Manager-side verification with a revocation policy check.
+///
+/// Public verification remains `group_verify`. This helper is for the manager
+/// or an authority that can both open the signature and consult the revocation
+/// list.
+pub fn group_verify_not_revoked<S: SphincsHasher>(
+    msg: &[u8],
+    sig: &SphincsSignature,
+    gpk: &GroupPK,
+    manager: &GroupManagerKey,
+    revocations: &GroupRevocationList,
+) -> bool {
+    if !group_verify::<S>(msg, sig, gpk) {
+        return false;
+    }
+    match group_open::<S>(msg, sig, manager) {
+        Some(member_index) => !revocations.is_revoked(member_index),
+        None => false,
+    }
+}
+
 /// Attempt to identify which member produced a signature (manager only).
 ///
-/// The manager uses `sk_seed` to recompute the WOTS+ public key for each
-/// candidate member leaf and checks it against the signature's authentication
-/// path. Returns `Some(member_index)` if a matching member is found.
+/// The manager scans candidate leaves and checks whether the FORS and
+/// hypertree parts are consistent with that member leaf. Returns
+/// `Some(member_index)` if a matching member is found.
 ///
 /// # Complexity
 /// O(M × WOTS+ key generation) where M = number of members.
@@ -247,7 +322,7 @@ pub fn group_verify_raw<S: SphincsHasher>(msg: &[u8], sig_bytes: &[u8], gpk: &Gr
 /// should use the authentication path structure to narrow the search.
 ///
 /// # Note on anonymity
-/// An external verifier who does NOT have `sk_seed` cannot efficiently
+/// An external verifier who does NOT have the manager state cannot efficiently
 /// perform this check, so anonymity holds against non-manager adversaries.
 pub fn group_identify_member<S: SphincsHasher>(
     msg: &[u8],
@@ -265,8 +340,17 @@ pub fn group_identify_member<S: SphincsHasher>(
             .find_any(|c| {
                 let leaf = *c as u64;
                 let f_adrs = fors_adrs(idx_tree, leaf);
-                let fpk =
-                    fors::fors_pk_from_sig::<S>(&sig.fors_sig, &md, &manager.pk_seed, &f_adrs);
+                let expected_sig =
+                    fors::fors_sign::<S>(&md, &manager.master_seed, &manager.pk_seed, &f_adrs);
+                if expected_sig != sig.fors_sig {
+                    return false;
+                }
+                let fpk = fors::fors_pk_from_sig::<S>(
+                    &sig.fors_sig,
+                    &md,
+                    &manager.pk_seed,
+                    &f_adrs,
+                );
                 ht::ht_verify::<S>(
                     &fpk,
                     &sig.ht_sig,
@@ -281,6 +365,11 @@ pub fn group_identify_member<S: SphincsHasher>(
     for c in 0..(manager.max_members as u32) {
         let leaf = c as u64;
         let f_adrs = fors_adrs(idx_tree, leaf);
+        let expected_sig =
+            fors::fors_sign::<S>(&md, &manager.master_seed, &manager.pk_seed, &f_adrs);
+        if expected_sig != sig.fors_sig {
+            continue;
+        }
         let fpk = fors::fors_pk_from_sig::<S>(&sig.fors_sig, &md, &manager.pk_seed, &f_adrs);
         if ht::ht_verify::<S>(
             &fpk,
@@ -310,7 +399,7 @@ mod tests {
         let msg = b"UNSW 26T1 Applied Cryptography group sig test";
 
         for idx in [0u32, 1, 7, (1 << HP) - 1] {
-            let msk = derive_member_key(&manager, idx);
+            let msk = derive_member_key::<RawSha256>(&manager, idx);
             let sig = group_sign::<RawSha256>(msg, &msk);
             assert!(
                 group_verify::<RawSha256>(msg, &sig, &gpk),
@@ -322,7 +411,7 @@ mod tests {
     #[test]
     fn group_wrong_message_fails() {
         let (manager, gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 0);
+        let msk = derive_member_key::<RawSha256>(&manager, 0);
         let sig = group_sign::<RawSha256>(b"correct", &msk);
         assert!(!group_verify::<RawSha256>(b"wrong", &sig, &gpk));
     }
@@ -331,7 +420,7 @@ mod tests {
     fn group_cross_group_fails() {
         let (manager1, gpk1) = group_keygen::<RawSha256>();
         let (_manager2, gpk2) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager1, 0);
+        let msk = derive_member_key::<RawSha256>(&manager1, 0);
         let msg = b"cross group test";
         let sig = group_sign::<RawSha256>(msg, &msk);
         assert!(
@@ -347,7 +436,7 @@ mod tests {
     #[test]
     fn group_raw_roundtrip() {
         let (manager, gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 3);
+        let msk = derive_member_key::<RawSha256>(&manager, 3);
         let msg = b"raw group sig test";
         let sig = group_sign::<RawSha256>(msg, &msk);
         let sig_bytes = serialise_sig(&sig);
@@ -361,7 +450,7 @@ mod tests {
         let msg = b"identify me";
 
         for expected_idx in [0u32, 1, 5] {
-            let msk = derive_member_key(&manager, expected_idx);
+            let msk = derive_member_key::<RawSha256>(&manager, expected_idx);
             let sig = group_sign::<RawSha256>(msg, &msk);
             let found = group_identify_member::<RawSha256>(msg, &sig, &manager);
             assert_eq!(
@@ -376,8 +465,8 @@ mod tests {
     fn group_signatures_are_anonymous() {
         let (manager, gpk) = group_keygen::<RawSha256>();
         let msg = b"anonymous message";
-        let msk0 = derive_member_key(&manager, 0);
-        let msk1 = derive_member_key(&manager, 1);
+        let msk0 = derive_member_key::<RawSha256>(&manager, 0);
+        let msk1 = derive_member_key::<RawSha256>(&manager, 1);
 
         let sig0 = group_sign::<RawSha256>(msg, &msk0);
         let sig1 = group_sign::<RawSha256>(msg, &msk1);
@@ -402,7 +491,7 @@ mod tests {
     #[test]
     fn group_member_can_sign_multiple_messages() {
         let (manager, gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 2);
+        let msk = derive_member_key::<RawSha256>(&manager, 2);
 
         let msgs: &[&[u8]] = &[b"msg one", b"msg two", b"msg three"];
         for msg in msgs {
@@ -419,7 +508,7 @@ mod tests {
     #[test]
     fn compute_group_root_same_as_keygen() {
         let (manager, _gpk) = group_keygen::<RawSha256>();
-        let again = compute_group_root::<RawSha256>(&manager.sk_seed, &manager.pk_seed);
+        let again = compute_group_root::<RawSha256>(&manager.master_seed, &manager.pk_seed);
         assert_eq!(again, manager.group_root);
     }
 
@@ -427,7 +516,7 @@ mod tests {
     #[test]
     fn search_r_hits_target() {
         let (manager, _gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 4);
+        let msk = derive_member_key::<RawSha256>(&manager, 4);
         let msg = b"find target leaf";
 
         let r = search_r::<RawSha256>(
@@ -442,5 +531,56 @@ mod tests {
         let (_, _, leaf) = split_digest(&digest);
 
         assert_eq!(leaf, msk.member_index as u64);
+    }
+
+    #[test]
+    fn member_key_hides_signing_seed_from_public_api() {
+        let (manager, _gpk) = group_keygen::<RawSha256>();
+        let member0 = derive_member_key::<RawSha256>(&manager, 0);
+        let member1 = derive_member_key::<RawSha256>(&manager, 1);
+
+        assert_eq!(member0.signing_seed, manager.master_seed);
+        assert_eq!(member1.signing_seed, manager.master_seed);
+        assert_ne!(member0.sk_prf, member1.sk_prf);
+    }
+
+    #[test]
+    fn group_open_matches_identify() {
+        let (manager, _gpk) = group_keygen::<RawSha256>();
+        let msk = derive_member_key::<RawSha256>(&manager, 6);
+        let msg = b"open the signature";
+        let sig = group_sign::<RawSha256>(msg, &msk);
+
+        assert_eq!(
+            group_open::<RawSha256>(msg, &sig, &manager),
+            group_identify_member::<RawSha256>(msg, &sig, &manager)
+        );
+        assert_eq!(group_open::<RawSha256>(msg, &sig, &manager), Some(6));
+    }
+
+    #[test]
+    fn group_verify_not_revoked_rejects_revoked_member() {
+        let (manager, gpk) = group_keygen::<RawSha256>();
+        let msk = derive_member_key::<RawSha256>(&manager, 9);
+        let msg = b"revocation policy";
+        let sig = group_sign::<RawSha256>(msg, &msk);
+
+        let mut revocations = GroupRevocationList::new();
+        assert!(group_verify_not_revoked::<RawSha256>(
+            msg,
+            &sig,
+            &gpk,
+            &manager,
+            &revocations
+        ));
+
+        revocations.revoke(9);
+        assert!(!group_verify_not_revoked::<RawSha256>(
+            msg,
+            &sig,
+            &gpk,
+            &manager,
+            &revocations
+        ));
     }
 }
