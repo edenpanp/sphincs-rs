@@ -172,7 +172,6 @@ fn kat_file_parses_and_lengths_match() {
 }
 
 #[test]
-#[ignore = "Bundled reference vectors do not yet verify under the current SHA2 backend"]
 fn kat_verify_sample_records() {
     let records = load_kat();
 
@@ -188,7 +187,6 @@ fn kat_verify_sample_records() {
 }
 
 #[test]
-#[ignore = "Long-running KAT sweep"]
 fn kat_verify_first_ten_records() {
     let records = load_kat();
 

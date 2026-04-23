@@ -2,14 +2,13 @@
 //!
 //! This module defines the [`SphincsHasher`] trait plus two concrete implementations:
 //!
-//! - [`Sha256Hasher`] – SHA2-256s / SLH-DSA SHA2 backend (FIPS 205 §11.2).
+//! - [`Sha256Hasher`] - SPHINCS+-SHA2-256s-simple backend.
 //! - [`RawSha256`]    – non-compliant test hasher for structural unit tests.
 //!
-//! # FIPS 205 §11.2 – SHA2 instantiation
+//! # SPHINCS+-SHA2-256s-simple instantiation
 //!
-//! For the `SHA2-256s` parameter set, FIPS 205 uses a mixed SHA2 backend:
-//! `PRF` and `F` are based on SHA-256, while `PRF_msg`, `H_msg`, `H`, and
-//! `T_l` use SHA-512/HMAC-SHA-512/MGF1-SHA-512 with truncation back to `n`.
+//! The bundled KAT vectors target the original SPHINCS+ SHA2 simple
+//! instantiation. It uses SHA-256 throughout, without robust bitmasks.
 //!
 //! # Compressed ADRS (ADRSc) – 22 bytes
 //!
@@ -113,28 +112,12 @@ fn build_prefix(pk_seed: &[u8; N], adrs: &Adrs) -> [u8; 86] {
 ///     output ‖= SHA-256(seed ‖ toByte(i, 4))
 /// return output[0..length]
 /// ```
-#[cfg(test)]
 fn mgf1_sha256(seed: &[u8], length: usize) -> Vec<u8> {
     use sha2::{Digest, Sha256};
     let mut out = Vec::with_capacity(length + 32);
     let mut counter: u32 = 0;
     while out.len() < length {
         let mut h = Sha256::new();
-        h.update(seed);
-        h.update(counter.to_be_bytes());
-        out.extend_from_slice(&h.finalize());
-        counter += 1;
-    }
-    out.truncate(length);
-    out
-}
-
-fn mgf1_sha512(seed: &[u8], length: usize) -> Vec<u8> {
-    use sha2::{Digest, Sha512};
-    let mut out = Vec::with_capacity(length + 64);
-    let mut counter: u32 = 0;
-    while out.len() < length {
-        let mut h = Sha512::new();
         h.update(seed);
         h.update(counter.to_be_bytes());
         out.extend_from_slice(&h.finalize());
@@ -152,7 +135,6 @@ fn mgf1_sha512(seed: &[u8], length: usize) -> Vec<u8> {
 /// opad = key XOR 0x5C_repeated
 /// HMAC = SHA-256(opad ‖ SHA-256(ipad ‖ data))
 /// ```
-#[cfg(test)]
 fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; N] {
     use sha2::{Digest, Sha256};
     const BLOCK: usize = 64;
@@ -187,93 +169,54 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; N] {
     outer.finalize().into()
 }
 
-fn hmac_sha512(key: &[u8], data: &[u8]) -> [u8; 64] {
-    use sha2::{Digest, Sha512};
-    const BLOCK: usize = 128;
-
-    let mut k = [0u8; BLOCK];
-    if key.len() > BLOCK {
-        let hk: [u8; 64] = Sha512::digest(key).into();
-        k[..64].copy_from_slice(&hk);
-    } else {
-        k[..key.len()].copy_from_slice(key);
-    }
-
-    let mut ipad_key = [0u8; BLOCK];
-    let mut opad_key = [0u8; BLOCK];
-    for i in 0..BLOCK {
-        ipad_key[i] = k[i] ^ 0x36;
-        opad_key[i] = k[i] ^ 0x5C;
-    }
-
-    let mut inner = Sha512::new();
-    inner.update(ipad_key);
-    inner.update(data);
-    let inner_hash: [u8; 64] = inner.finalize().into();
-
-    let mut outer = Sha512::new();
-    outer.update(opad_key);
-    outer.update(inner_hash);
-    outer.finalize().into()
-}
-
 // ── Sha256Hasher ──────────────────────────────────────────────────────────────
 
-/// FIPS 205 §11.2 SHA2 backend for the `SHA2-256s` parameter set.
+/// Original SPHINCS+-SHA2-256s-simple backend.
 ///
-/// This is the production hasher. For `SLH-DSA-SHA2-256s`, `PRF` and `F`
-/// use SHA-256, while `PRF_msg`, `H_msg`, `H`, and `T_l` use SHA-512-based
-/// constructions truncated back to `n = 32` bytes.
+/// This matches the bundled `PQCsignKAT_128.rsp` vectors, which predate
+/// the FIPS 205 SHA2 changes.
 pub struct Sha256Hasher;
 
 impl SphincsHasher for Sha256Hasher {
-    /// `PRF(PK.seed, SK.seed, ADRS)` (FIPS 205 §11.2.1)
+    /// `PRF(SK.seed, ADRS)` (SPHINCS+ §F.2 SHA-256 instantiation)
     ///
-    /// `SHA-256(PK.seed ‖ toByte(0, 64−n) ‖ ADRSc ‖ SK.seed)`
-    fn prf(pk_seed: &[u8; N], sk_seed: &[u8; N], adrs: &Adrs) -> [u8; N] {
+    /// `SHA-256(SK.seed ‖ ADRSc)`
+    fn prf(_pk_seed: &[u8; N], sk_seed: &[u8; N], adrs: &Adrs) -> [u8; N] {
         use sha2::{Digest, Sha256};
-        let prefix = build_prefix(pk_seed, adrs);
+        let adrs_c = compress_adrs(adrs);
         let mut h = Sha256::new();
-        h.update(prefix); // 86 bytes: PK.seed(32) ‖ zeros(32) ‖ ADRSc(22)
-        h.update(sk_seed); // 32 bytes: SK.seed
+        h.update(sk_seed);
+        h.update(adrs_c);
         h.finalize().into()
     }
 
-    /// `PRF_msg(SK.prf, opt_rand, M)` (FIPS 205 §11.2.2)
+    /// `PRF_msg(SK.prf, opt_rand, M)` (SPHINCS+ §7 SHA-256 instantiation)
     ///
-    /// `Trunc_n(HMAC-SHA-512(SK.prf, opt_rand ‖ M))`
+    /// `HMAC-SHA-256(SK.prf, opt_rand ‖ M)`
     fn prf_msg(sk_prf: &[u8; N], opt_rand: &[u8; N], msg: &[u8]) -> [u8; N] {
         let mut data = Vec::with_capacity(N + msg.len());
         data.extend_from_slice(opt_rand);
         data.extend_from_slice(msg);
-        let full = hmac_sha512(sk_prf, &data);
-        let mut out = [0u8; N];
-        out.copy_from_slice(&full[..N]);
-        out
+        hmac_sha256(sk_prf, &data)
     }
 
-    /// `H_msg(R, PK.seed, PK.root, M)` (FIPS 205 §11.2.2)
+    /// `H_msg(R, PK.seed, PK.root, M)` (SPHINCS+ §F.2 SHA-256 instantiation)
     ///
     /// ```text
-    /// seed   = SHA-512(R ‖ PK.seed ‖ PK.root ‖ M)
-    /// H_msg  = MGF1-SHA-512(R ‖ PK.seed ‖ seed, m)
+    /// seed   = SHA-256(R ‖ PK.seed ‖ PK.root ‖ M)
+    /// H_msg  = MGF1-SHA-256(seed, m)
     /// ```
     fn h_msg(r: &[u8; N], pk_seed: &[u8; N], pk_root: &[u8; N], msg: &[u8]) -> [u8; M] {
-        use sha2::{Digest, Sha512};
+        use sha2::{Digest, Sha256};
 
-        let mut inner = Sha512::new();
+        let mut inner = Sha256::new();
         inner.update(r);
         inner.update(pk_seed);
         inner.update(pk_root);
         inner.update(msg);
-        let seed: [u8; 64] = inner.finalize().into();
+        let seed: [u8; N] = inner.finalize().into();
 
-        let mut mgf1_seed = Vec::with_capacity(2 * N + 64);
-        mgf1_seed.extend_from_slice(r);
-        mgf1_seed.extend_from_slice(pk_seed);
-        mgf1_seed.extend_from_slice(&seed);
-
-        let expanded = mgf1_sha512(&mgf1_seed, M);
+        let expanded = mgf1_sha256(&seed, M);
         let mut out = [0u8; M];
         out.copy_from_slice(&expanded);
         out
@@ -291,43 +234,31 @@ impl SphincsHasher for Sha256Hasher {
         h.finalize().into()
     }
 
-    /// `H(PK.seed, ADRS, M₁ ‖ M₂)` (FIPS 205 §11.2.2)
+    /// `H(PK.seed, ADRS, M₁ ‖ M₂)` (SPHINCS+ §7 SHA-256 instantiation)
     ///
-    /// `Trunc_n(SHA-512(PK.seed ‖ toByte(0, 128−n) ‖ ADRSc ‖ M₁ ‖ M₂))`
+    /// `SHA-256(PK.seed ‖ toByte(0, 64−n) ‖ ADRSc ‖ M₁ ‖ M₂)`
     fn h_two(pk_seed: &[u8; N], adrs: &Adrs, left: &[u8; N], right: &[u8; N]) -> [u8; N] {
-        use sha2::{Digest, Sha512};
-        let mut prefix = [0u8; 150];
-        prefix[0..32].copy_from_slice(pk_seed);
-        let adrs_c = compress_adrs(adrs);
-        prefix[128..150].copy_from_slice(&adrs_c);
-        let mut h = Sha512::new();
+        use sha2::{Digest, Sha256};
+        let prefix = build_prefix(pk_seed, adrs);
+        let mut h = Sha256::new();
         h.update(prefix);
         h.update(left);
         h.update(right);
-        let full: [u8; 64] = h.finalize().into();
-        let mut out = [0u8; N];
-        out.copy_from_slice(&full[..N]);
-        out
+        h.finalize().into()
     }
 
-    /// `T_l(PK.seed, ADRS, M₁ ‖ … ‖ Mₗ)` (FIPS 205 §11.2.2)
+    /// `T_l(PK.seed, ADRS, M₁ ‖ … ‖ Mₗ)` (SPHINCS+ §7 SHA-256 instantiation)
     ///
-    /// `Trunc_n(SHA-512(PK.seed ‖ toByte(0, 128−n) ‖ ADRSc ‖ M₁ ‖ … ‖ Mₗ))`
+    /// `SHA-256(PK.seed ‖ toByte(0, 64−n) ‖ ADRSc ‖ M₁ ‖ … ‖ Mₗ)`
     fn t_l(pk_seed: &[u8; N], adrs: &Adrs, inputs: &[[u8; N]]) -> [u8; N] {
-        use sha2::{Digest, Sha512};
-        let mut prefix = [0u8; 150];
-        prefix[0..32].copy_from_slice(pk_seed);
-        let adrs_c = compress_adrs(adrs);
-        prefix[128..150].copy_from_slice(&adrs_c);
-        let mut h = Sha512::new();
+        use sha2::{Digest, Sha256};
+        let prefix = build_prefix(pk_seed, adrs);
+        let mut h = Sha256::new();
         h.update(prefix);
         for block in inputs {
             h.update(block);
         }
-        let full: [u8; 64] = h.finalize().into();
-        let mut out = [0u8; N];
-        out.copy_from_slice(&full[..N]);
-        out
+        h.finalize().into()
     }
 }
 

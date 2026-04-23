@@ -57,16 +57,16 @@ pub struct ForsSig {
 /// Decode the FORS portion of the message digest into K leaf indices.
 ///
 /// The `MD_BYTES = ⌈K·A/8⌉` bytes are split into K consecutive A-bit
-/// integers in FIPS 205 `base_2b` order, i.e. bytes are consumed in
-/// big-endian bit order. Each index selects one leaf in the
-/// corresponding tree, i.e. each is in [0, T = 2^A).
+/// integers using LSB-first bit ordering within each byte (matching the
+/// SPHINCS+ v3.1 reference `message_to_indices`). Each index selects
+/// one leaf in the corresponding FORS tree, i.e. each is in [0, T = 2^A).
 ///
-/// # Example (K=2, A=3)
+/// # Example (K=2, A=3, first byte = 0b_110_xxx_xx)
 ///
 /// ```text
-/// md bytes: [0b_110_010_xx, ...]
-///             ^^^  ^^^
-///            idx₀=6  idx₁=2
+/// byte bit layout (LSB=bit0 first):
+///   bits 0,1,2 → idx₀  (placed at positions j=0,1,2 of idx₀)
+///   bits 3,4,5 → idx₁
 /// ```
 fn decode_indices(md: &[u8; MD_BYTES]) -> [usize; K] {
     let mut indices = [0usize; K];
@@ -74,10 +74,10 @@ fn decode_indices(md: &[u8; MD_BYTES]) -> [usize; K] {
 
     for idx in indices.iter_mut() {
         let mut val = 0usize;
-        for _ in 0..A {
+        for j in 0..A {
             let byte_pos = bit_ptr / 8;
-            let bit_pos = 7 - (bit_ptr % 8);
-            val = (val << 1) | (((md[byte_pos] >> bit_pos) & 1) as usize);
+            let bit_pos = bit_ptr % 8; // LSB-first: bit 0 is the least significant bit
+            val |= (((md[byte_pos] >> bit_pos) & 1) as usize) << j;
             bit_ptr += 1;
         }
         *idx = val;
