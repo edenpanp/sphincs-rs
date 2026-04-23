@@ -1,446 +1,1172 @@
-//! group signature experiment using the existing SPHINCS+ code.
-//! one group is one top XMSS tree, so with HP=8 this gives up to 256 members.
-//! roughly follows eprint 2025/760 but only keeps sign/verify/identify.
 
-use rand::{RngCore, rngs::OsRng};
+use rand::{rngs::OsRng, RngCore};
+use sha2::{Digest, Sha256};
 
-use crate::digest::{fors_adrs, split_digest};
-use crate::fors;
-use crate::hash::SphincsHasher;
-use crate::ht;
-use crate::params::{D, HP, N};
-use crate::sphincs::{SphincsPK, SphincsSignature, deserialise_sig, slh_verify};
-use crate::xmss;
+use crate::adrs::{Adrs, AdrsType};
+use crate::hash::Sha256Hasher;
+use crate::params::{N, WOTS_LEN};
+use crate::sphincs::{
+    deserialise_sig, serialise_sig, slh_keygen_fast, slh_sign_fast, slh_verify, SphincsPK,
+    SphincsSK, SphincsSignature, SIG_BYTES,
+};
+use crate::wots::{self, WotsSig};
 
-/// The group manager's master key material.
-///
-/// The manager distributes individual [`MemberSK`]s from this.
-/// `sk_seed` is sensitive — compromise of `sk_seed` allows forging signatures
-/// for any member.
-pub struct GroupManagerKey {
-    /// Shared master secret (derives every member leaf).
-    pub sk_seed: [u8; N],
-    /// Public seed (shared with all members and verifiers).
-    pub pk_seed: [u8; N],
-    /// Pre-computed group root (top-level XMSS tree root = group PK.root).
-    pub group_root: [u8; N],
-    /// Maximum number of members (2^HP per top-level XMSS tree).
-    pub max_members: usize,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupError {
+    MemberLimitReached,
+    UnknownMember,
+    NoUnusedCertifiedKey,
+    BadKeyIndex,
+    CertificateMismatch,
+    BadRawEncoding,
 }
 
-/// A single member's secret key.
-///
-/// Derived by the manager and distributed to member `index`.
-/// Members do NOT learn `sk_seed` of other members because only the
-/// manager holds `sk_seed`; the member receives only what they need
-/// to sign at their own leaf.
-#[derive(Clone)]
+/// Public part of one one-time WOTS+ key.
+#[derive(Clone, Debug)]
+pub struct OneTimePublicKey {
+    pub member_id: u32,
+    pub key_id: u32,
+    pub pk_seed: [u8; N],
+    pub wots_pk: [u8; N],
+}
+
+/// Full one-time WOTS+ key pair held by the member.
+#[derive(Clone, Debug)]
+struct OneTimeKeyPair {
+    key_id: u32,
+    sk_seed: [u8; N],
+    pk_seed: [u8; N],
+    public_key: OneTimePublicKey,
+}
+
+/// Certificate issued by the manager for one WOTS+ public key.
+#[derive(Clone, Debug)]
+pub struct MemberCertificate {
+    pub certificate_id: u64,
+    pub member_id: u32,
+    pub key_id: u32,
+    pub issued_epoch: u64,
+    pub expiry_epoch: u64,
+    pub role: u8,
+    pub pk_seed: [u8; N],
+    pub wots_pk: [u8; N],
+    pub manager_signature: SphincsSignature,
+}
+
+/// Extra policy used during verification.
+#[derive(Clone, Debug)]
+pub struct CertificateValidationPolicy {
+    pub current_epoch: u64,
+    pub check_role: bool,
+    pub required_role: u8,
+    pub revoked_certificate_ids: Vec<u64>,
+    pub revoked_members: Vec<u32>,
+}
+
+impl CertificateValidationPolicy {
+    /// Build a default policy for a given current epoch.
+    pub fn new(current_epoch: u64) -> Self {
+        let policy = CertificateValidationPolicy {
+            current_epoch: current_epoch,
+            check_role: false,
+            required_role: 0,
+            revoked_certificate_ids: Vec::new(),
+            revoked_members: Vec::new(),
+        };
+
+        policy
+    }
+}
+
+/// Local member state: one key pair + one certificate + a used flag.
+#[derive(Clone, Debug)]
+struct CertifiedKey {
+    key_pair: OneTimeKeyPair,
+    certificate: MemberCertificate,
+    used: bool,
+}
+
+/// Full member signing state.
+#[derive(Clone, Debug)]
 pub struct MemberSK {
-    /// Shared master secret — needed to compute WOTS+ leaf at `index`.
-    pub sk_seed: [u8; N],
-    /// Per-member PRF key for message randomness.
-    /// Each member has an independent `sk_prf` so their R values are
-    /// unlinkable across signatures.
-    pub sk_prf: [u8; N],
-    /// Public seed (same for all members).
-    pub pk_seed: [u8; N],
-    /// Pre-computed group root.
-    pub group_root: [u8; N],
-    /// This member's leaf index within the top-level XMSS tree (0..2^HP).
-    pub member_index: u32,
+    pub member_id: u32,
+    member_seed: [u8; N],
+    certified_keys: Vec<CertifiedKey>,
+    next_key_id: u32,
 }
 
-/// The group public key.
-///
-/// Any verifier can verify a group signature using only this key.
-/// It is structurally identical to a SPHINCS+ public key.
+/// Final group signature = certificate + WOTS+ signature.
+#[derive(Clone, Debug)]
+pub struct GroupSignature {
+    pub certificate: MemberCertificate,
+    pub wots_signature: WotsSig,
+}
+
+pub const GROUP_SIG_BYTES: usize = 8
+    + 4
+    + 4
+    + 8
+    + 8
+    + 1
+    + N
+    + N
+    + SIG_BYTES
+    + WOTS_LEN * N;
+
+/// Public verification key for the group system.
+#[derive(Clone, Debug)]
 pub struct GroupPK {
-    pub pk_seed: [u8; N],
-    pub group_root: [u8; N],
+    pub manager_pk: SphincsPK,
 }
 
 impl GroupPK {
-    /// Convert to the underlying SPHINCS+ public key for `slh_verify`.
-    pub fn as_sphincs_pk(&self) -> SphincsPK {
-        SphincsPK {
-            pk_seed: self.pk_seed,
-            pk_root: self.group_root,
+    pub fn as_sphincs_pk(&self) -> &SphincsPK {
+        &self.manager_pk
+    }
+}
+
+/// Manager secret state.
+#[derive(Clone, Debug)]
+pub struct GroupManagerKey {
+    signing_sk: SphincsSK,
+    signing_pk: SphincsPK,
+    max_members: u32,
+    next_member_id: u32,
+    next_certificate_id: u64,
+    current_epoch: u64,
+    default_validity_epochs: u64,
+    issued_certificates: Vec<(u64, u32)>,
+    member_seeds: Vec<(u32, [u8; N])>,
+    member_roles: Vec<(u32, u8)>,
+}
+
+/// Small helper: hash multiple byte slices into one N-byte output.
+fn hash32(parts: &[&[u8]]) -> [u8; N] {
+    let mut h = Sha256::new();
+    let mut i = 0usize;
+
+    while i < parts.len() {
+        h.update(parts[i]);
+        i += 1;
+    }
+
+    let digest = h.finalize();
+    let mut out = [0u8; N];
+    out.copy_from_slice(&digest[0..N]);
+    out
+}
+
+/// Find the position of a member seed record in the manager.
+fn find_member_seed_pos(manager: &GroupManagerKey, member_id: u32) -> Option<usize> {
+    let mut i = 0usize;
+
+    while i < manager.member_seeds.len() {
+        if manager.member_seeds[i].0 == member_id {
+            return Some(i);
         }
-    }
-}
-
-// compute top-level XMSS root (= group root). same as slh_keygen does
-// but pull out so we can test it seperately.
-pub fn compute_group_root<S: SphincsHasher>(sk_seed: &[u8; N], pk_seed: &[u8; N]) -> [u8; N] {
-    let mut adrs = crate::adrs::Adrs::new(crate::adrs::AdrsType::TreeNode);
-    adrs.set_layer_address((D - 1) as u32);
-    adrs.set_tree_address(0);
-    xmss::xmss_node_fast::<S>(sk_seed, 0, HP, pk_seed, adrs)
-}
-
-// search for r so digest's idx_leaf == target_leaf.
-// scan last 2 bytes of opt_rand, 2^16 combos. for HP=8 around 256 tries
-// on average. return None if all fail (basicly never).
-// TODO: maybe also randomize more bytes if 2 bytes not enough.
-pub fn search_r<S: SphincsHasher>(
-    msg: &[u8],
-    sk_prf: &[u8; N],
-    pk_seed: &[u8; N],
-    group_root: &[u8; N],
-    target_leaf: u64,
-) -> Option<[u8; N]> {
-    #[cfg(feature = "parallel")]
-    {
-        use rayon::prelude::*;
-        return (0u32..65536).into_par_iter().find_map_any(|idx| {
-            let hi = (idx >> 8) as u8;
-            let lo = (idx & 0xff) as u8;
-            let mut opt = *pk_seed;
-            opt[N - 2] = hi;
-            opt[N - 1] = lo;
-            let r_try = S::prf_msg(sk_prf, &opt, msg);
-            let d = S::h_msg(&r_try, pk_seed, group_root, msg);
-            let (_, _, leaf) = split_digest(&d);
-            if leaf == target_leaf {
-                Some(r_try)
-            } else {
-                None
-            }
-        });
+        i += 1;
     }
 
-    // sequential fallback (no rayon).
-    let mut ans: Option<[u8; N]> = None;
-    let mut done = false;
-    for hi in 0u8..=255 {
-        if done {
-            break;
-        }
-        for lo in 0u8..=255 {
-            let mut opt = *pk_seed;
-            opt[N - 2] = hi;
-            opt[N - 1] = lo;
-            let r_try = S::prf_msg(sk_prf, &opt, msg);
-            let d = S::h_msg(&r_try, pk_seed, group_root, msg);
-            let (_, _, leaf) = split_digest(&d);
-            if leaf == target_leaf {
-                ans = Some(r_try);
-                done = true;
-                break;
-            }
-        }
-    }
-    ans
-}
-
-/// Generate a group key pair for up to `2^HP` members (FIPS 205 Alg. 18 variant).
-///
-/// The manager calls this once and distributes member keys via [`derive_member_key`].
-pub fn group_keygen<S: SphincsHasher>() -> (GroupManagerKey, GroupPK) {
-    let mut sk_seed = [0u8; N];
-    let mut pk_seed = [0u8; N];
-    OsRng.fill_bytes(&mut sk_seed);
-    OsRng.fill_bytes(&mut pk_seed);
-
-    let group_root = compute_group_root::<S>(&sk_seed, &pk_seed);
-
-    let manager = GroupManagerKey {
-        sk_seed,
-        pk_seed,
-        group_root,
-        max_members: 1 << HP,
-    };
-    let gpk = GroupPK {
-        pk_seed,
-        group_root,
-    };
-    (manager, gpk)
-}
-
-/// Derive member `index`'s secret key from the manager key.
-///
-/// `index` must be in `0..manager.max_members`.
-/// Each member gets an independent `sk_prf` sampled freshly so their
-/// per-message randomness is unlinkable.
-pub fn derive_member_key(manager: &GroupManagerKey, index: u32) -> MemberSK {
-    assert!(
-        (index as usize) < manager.max_members,
-        "member index {index} exceeds max_members {}",
-        manager.max_members
-    );
-    let mut sk_prf = [0u8; N];
-    OsRng.fill_bytes(&mut sk_prf);
-
-    MemberSK {
-        sk_seed: manager.sk_seed,
-        sk_prf,
-        pk_seed: manager.pk_seed,
-        group_root: manager.group_root,
-        member_index: index,
-    }
-}
-
-/// Sign a message as a group member (FIPS 205 Alg. 19 variant).
-///
-/// # Key difference from `slh_sign`
-///
-/// In standard SPHINCS+, `idx_leaf` comes from the message digest.
-/// Here, `idx_leaf` is **forced to `member_index`**, so the member's
-/// WOTS+ leaf is always used, regardless of the message content.
-/// The `idx_tree` still comes from the digest for domain separation.
-///
-/// This means the FORS signature is computed for the same tree/leaf
-/// combination as in standard signing, but the HT signature always
-/// authenticates through the member's specific leaf.
-pub fn group_sign<S: SphincsHasher>(msg: &[u8], sk: &MemberSK) -> SphincsSignature {
-    // find r so idx_leaf from digest == member_index. otherwise FORS and
-    // HT will not agree and verify fail.
-    let r = search_r::<S>(
-        msg,
-        &sk.sk_prf,
-        &sk.pk_seed,
-        &sk.group_root,
-        sk.member_index as u64,
-    )
-    .expect("search_r: 2^16 tries exhausted");
-    let d = S::h_msg(&r, &sk.pk_seed, &sk.group_root, msg);
-    let (md, idx_tree, _) = split_digest(&d);
-    let idx_leaf = sk.member_index as u64;
-
-    let f_adrs = fors_adrs(idx_tree, idx_leaf);
-    let fors_sig = fors::fors_sign::<S>(&md, &sk.sk_seed, &sk.pk_seed, &f_adrs);
-    let fors_pk = fors::fors_pk_from_sig::<S>(&fors_sig, &md, &sk.pk_seed, &f_adrs);
-    let ht_sig = ht::ht_sign_fast::<S>(&fors_pk, &sk.sk_seed, &sk.pk_seed, idx_tree, idx_leaf);
-
-    SphincsSignature {
-        r,
-        fors_sig,
-        ht_sig,
-    }
-}
-
-/// Verify a group signature (standard `slh_verify` under the group public key).
-///
-/// Returns `true` iff the signature is valid under `gpk`.
-/// Does NOT reveal which member signed.
-pub fn group_verify<S: SphincsHasher>(msg: &[u8], sig: &SphincsSignature, gpk: &GroupPK) -> bool {
-    slh_verify::<S>(msg, sig, &gpk.as_sphincs_pk())
-}
-
-/// Verify a group signature from raw bytes.
-pub fn group_verify_raw<S: SphincsHasher>(msg: &[u8], sig_bytes: &[u8], gpk: &GroupPK) -> bool {
-    match deserialise_sig(sig_bytes) {
-        Some(sig) => group_verify::<S>(msg, &sig, gpk),
-        None => false,
-    }
-}
-
-/// Attempt to identify which member produced a signature (manager only).
-///
-/// The manager uses `sk_seed` to recompute the WOTS+ public key for each
-/// candidate member leaf and checks it against the signature's authentication
-/// path. Returns `Some(member_index)` if a matching member is found.
-///
-/// # Complexity
-/// O(M × WOTS+ key generation) where M = number of members.
-/// For M ≤ 256 (HP=8) this is practical; for larger groups, the manager
-/// should use the authentication path structure to narrow the search.
-///
-/// # Note on anonymity
-/// An external verifier who does NOT have `sk_seed` cannot efficiently
-/// perform this check, so anonymity holds against non-manager adversaries.
-pub fn group_identify_member<S: SphincsHasher>(
-    msg: &[u8],
-    sig: &SphincsSignature,
-    manager: &GroupManagerKey,
-) -> Option<u32> {
-    let d = S::h_msg(&sig.r, &manager.pk_seed, &manager.group_root, msg);
-    let (md, idx_tree, _) = split_digest(&d);
-
-    #[cfg(feature = "parallel")]
-    {
-        use rayon::prelude::*;
-        return (0..(manager.max_members as u32))
-            .into_par_iter()
-            .find_any(|c| {
-                let leaf = *c as u64;
-                let f_adrs = fors_adrs(idx_tree, leaf);
-                let fpk =
-                    fors::fors_pk_from_sig::<S>(&sig.fors_sig, &md, &manager.pk_seed, &f_adrs);
-                ht::ht_verify::<S>(
-                    &fpk,
-                    &sig.ht_sig,
-                    &manager.pk_seed,
-                    idx_tree,
-                    leaf,
-                    &manager.group_root,
-                )
-            });
-    }
-
-    for c in 0..(manager.max_members as u32) {
-        let leaf = c as u64;
-        let f_adrs = fors_adrs(idx_tree, leaf);
-        let fpk = fors::fors_pk_from_sig::<S>(&sig.fors_sig, &md, &manager.pk_seed, &f_adrs);
-        if ht::ht_verify::<S>(
-            &fpk,
-            &sig.ht_sig,
-            &manager.pk_seed,
-            idx_tree,
-            leaf,
-            &manager.group_root,
-        ) {
-            return Some(c);
-        }
-    }
     None
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+/// Find the role of one member. If no role was set, return the default role 1.
+fn get_member_role(manager: &GroupManagerKey, member_id: u32) -> u8 {
+    let mut i = 0usize;
+
+    while i < manager.member_roles.len() {
+        if manager.member_roles[i].0 == member_id {
+            return manager.member_roles[i].1;
+        }
+        i += 1;
+    }
+
+    1u8
+}
+
+/// Find the member id that belongs to one certificate id.
+fn get_member_from_certificate_id(manager: &GroupManagerKey, certificate_id: u64) -> Option<u32> {
+    let mut i = 0usize;
+
+    while i < manager.issued_certificates.len() {
+        if manager.issued_certificates[i].0 == certificate_id {
+            return Some(manager.issued_certificates[i].1);
+        }
+        i += 1;
+    }
+
+    None
+}
+
+/// Check whether a revoked certificate list contains a given certificate id.
+fn revoked_certificate_list_contains(list: &[u64], certificate_id: u64) -> bool {
+    let mut i = 0usize;
+
+    while i < list.len() {
+        if list[i] == certificate_id {
+            return true;
+        }
+        i += 1;
+    }
+
+    false
+}
+
+/// Check whether a revoked member list contains a given member id.
+fn revoked_member_list_contains(list: &[u32], member_id: u32) -> bool {
+    let mut i = 0usize;
+
+    while i < list.len() {
+        if list[i] == member_id {
+            return true;
+        }
+        i += 1;
+    }
+
+    false
+}
+
+/// Hash an arbitrary message down to the fixed N-byte input expected here.
+fn hash_message_for_wots(msg: &[u8]) -> [u8; N] {
+    let parts = [msg];
+    let digest = hash32(&parts);
+    digest
+}
+
+/// Build the ADRS used for one member's one-time WOTS key.
+///
+/// Here we bind:
+/// - `member_id` into the tree address
+/// - `key_id` into the keypair address
+fn member_wots_adrs(member_id: u32, key_id: u32) -> Adrs {
+    let mut adrs = Adrs::new(AdrsType::Wots);
+
+    adrs.set_layer_address(0);
+    adrs.set_tree_address(member_id as u64);
+    adrs.set_keypair_address(key_id);
+
+    adrs
+}
+
+/// Derive one WOTS+ key pair from the member seed and indices.
+fn derive_wots_key_pair(
+    member_seed: &[u8; N],
+    member_id: u32,
+    key_id: u32,
+) -> OneTimeKeyPair {
+    let member_id_bytes = member_id.to_be_bytes();
+    let key_id_bytes = key_id.to_be_bytes();
+
+    let sk_parts = [
+        &member_seed[..],
+        &b"member-wots-sk"[..],
+        &member_id_bytes[..],
+        &key_id_bytes[..],
+    ];
+    let sk_seed = hash32(&sk_parts);
+
+    let pk_parts = [
+        &member_seed[..],
+        &b"member-wots-pk"[..],
+        &member_id_bytes[..],
+        &key_id_bytes[..],
+    ];
+    let pk_seed = hash32(&pk_parts);
+
+    let adrs = member_wots_adrs(member_id, key_id);
+    let wots_pk = wots::wots_pk_gen::<Sha256Hasher>(&sk_seed, &pk_seed, &adrs);
+
+    let public_key = OneTimePublicKey {
+        member_id: member_id,
+        key_id: key_id,
+        pk_seed: pk_seed,
+        wots_pk: wots_pk,
+    };
+
+    let key_pair = OneTimeKeyPair {
+        key_id: key_id,
+        sk_seed: sk_seed,
+        pk_seed: pk_seed,
+        public_key: public_key,
+    };
+
+    key_pair
+}
+
+/// Serialise the exact certificate body that the manager signs.
+fn serialise_certificate_body(
+    certificate_id: u64,
+    member_id: u32,
+    key_id: u32,
+    issued_epoch: u64,
+    expiry_epoch: u64,
+    role: u8,
+    pk_seed: &[u8; N],
+    wots_pk: &[u8; N],
+) -> Vec<u8> {
+    let mut out = Vec::new();
+
+    out.extend_from_slice(&certificate_id.to_be_bytes());
+    out.extend_from_slice(&member_id.to_be_bytes());
+    out.extend_from_slice(&key_id.to_be_bytes());
+    out.extend_from_slice(&issued_epoch.to_be_bytes());
+    out.extend_from_slice(&expiry_epoch.to_be_bytes());
+    out.push(role);
+    out.extend_from_slice(pk_seed);
+    out.extend_from_slice(wots_pk);
+
+    out
+}
+
+/// Build one certificate for one WOTS+ public key.
+fn make_certificate(
+    manager: &mut GroupManagerKey,
+    public_key: &OneTimePublicKey,
+) -> MemberCertificate {
+    let certificate_id = manager.next_certificate_id;
+    manager.next_certificate_id += 1;
+
+    let issued_epoch = manager.current_epoch;
+    let expiry_epoch;
+
+    if u64::MAX - issued_epoch < manager.default_validity_epochs {
+        expiry_epoch = u64::MAX;
+    } else {
+        expiry_epoch = issued_epoch + manager.default_validity_epochs;
+    }
+
+    let role = get_member_role(manager, public_key.member_id);
+
+    let cert_body = serialise_certificate_body(
+        certificate_id,
+        public_key.member_id,
+        public_key.key_id,
+        issued_epoch,
+        expiry_epoch,
+        role,
+        &public_key.pk_seed,
+        &public_key.wots_pk,
+    );
+
+    let manager_signature = slh_sign_fast::<Sha256Hasher>(&cert_body, &manager.signing_sk);
+
+    manager
+        .issued_certificates
+        .push((certificate_id, public_key.member_id));
+
+    let certificate = MemberCertificate {
+        certificate_id: certificate_id,
+        member_id: public_key.member_id,
+        key_id: public_key.key_id,
+        issued_epoch: issued_epoch,
+        expiry_epoch: expiry_epoch,
+        role: role,
+        pk_seed: public_key.pk_seed,
+        wots_pk: public_key.wots_pk,
+        manager_signature: manager_signature,
+    };
+
+    certificate
+}
+
+/// Append `count` new certified WOTS+ keys to one member.
+fn append_new_certified_keys(
+    manager: &mut GroupManagerKey,
+    member: &mut MemberSK,
+    count: usize,
+) {
+    let start = member.next_key_id;
+    let mut offset = 0u32;
+
+    while (offset as usize) < count {
+        let key_id = start + offset;
+        let key_pair = derive_wots_key_pair(&member.member_seed, member.member_id, key_id);
+        let certificate = make_certificate(manager, &key_pair.public_key);
+
+        let certified_key = CertifiedKey {
+            key_pair: key_pair,
+            certificate: certificate,
+            used: false,
+        };
+
+        member.certified_keys.push(certified_key);
+        offset += 1;
+    }
+
+    member.next_key_id = start + count as u32;
+}
+
+/// Generate manager keys and the group public key.
+pub fn group_keygen() -> (GroupManagerKey, GroupPK) {
+    let (signing_sk, signing_pk) = slh_keygen_fast::<Sha256Hasher>();
+
+    let manager = GroupManagerKey {
+        signing_sk: signing_sk,
+        signing_pk: signing_pk.clone(),
+        max_members: 1u32 << crate::params::HP,
+        next_member_id: 0,
+        next_certificate_id: 0,
+        current_epoch: 0,
+        default_validity_epochs: 64,
+        issued_certificates: Vec::new(),
+        member_seeds: Vec::new(),
+        member_roles: Vec::new(),
+    };
+
+    let gpk = GroupPK {
+        manager_pk: signing_pk,
+    };
+
+    (manager, gpk)
+}
+
+/// Add one new member and give them an initial batch of certified keys.
+pub fn add_member(
+    manager: &mut GroupManagerKey,
+    initial_keys: usize,
+) -> Result<MemberSK, GroupError> {
+    if manager.next_member_id >= manager.max_members {
+        return Err(GroupError::MemberLimitReached);
+    }
+
+    let member_id = manager.next_member_id;
+    manager.next_member_id += 1;
+
+    let mut member_seed = [0u8; N];
+    OsRng.fill_bytes(&mut member_seed);
+
+    manager.member_seeds.push((member_id, member_seed));
+    manager.member_roles.push((member_id, 1));
+
+    let mut member = MemberSK {
+        member_id: member_id,
+        member_seed: member_seed,
+        certified_keys: Vec::new(),
+        next_key_id: 0,
+    };
+
+    append_new_certified_keys(manager, &mut member, initial_keys);
+
+    Ok(member)
+}
+
+/// Rebuild a member signing key from manager state.
+pub fn derive_member_key(
+    manager: &mut GroupManagerKey,
+    member_id: u32,
+    initial_keys: usize,
+) -> Result<MemberSK, GroupError> {
+    let maybe_pos = find_member_seed_pos(manager, member_id);
+
+    if maybe_pos.is_none() {
+        return Err(GroupError::UnknownMember);
+    }
+
+    let pos = maybe_pos.unwrap();
+    let member_seed = manager.member_seeds[pos].1;
+
+    let mut member = MemberSK {
+        member_id: member_id,
+        member_seed: member_seed,
+        certified_keys: Vec::new(),
+        next_key_id: 0,
+    };
+
+    append_new_certified_keys(manager, &mut member, initial_keys);
+
+    Ok(member)
+}
+
+/// Issue more certified WOTS+ keys for an existing member.
+pub fn certify_new_keys_for_member(
+    manager: &mut GroupManagerKey,
+    member: &mut MemberSK,
+    count: usize,
+) -> Result<(), GroupError> {
+    let maybe_pos = find_member_seed_pos(manager, member.member_id);
+
+    if maybe_pos.is_none() {
+        return Err(GroupError::UnknownMember);
+    }
+
+    append_new_certified_keys(manager, member, count);
+
+    Ok(())
+}
+
+/// Set the manager's current epoch.
+pub fn set_manager_epoch(manager: &mut GroupManagerKey, epoch: u64) {
+    manager.current_epoch = epoch;
+}
+
+/// Set the default certificate lifetime.
+pub fn set_default_certificate_validity(
+    manager: &mut GroupManagerKey,
+    validity_epochs: u64,
+) {
+    manager.default_validity_epochs = validity_epochs;
+}
+
+/// Set the role of a member.
+pub fn set_member_role(
+    manager: &mut GroupManagerKey,
+    member_id: u32,
+    role: u8,
+) -> Result<(), GroupError> {
+    let maybe_pos = find_member_seed_pos(manager, member_id);
+
+    if maybe_pos.is_none() {
+        return Err(GroupError::UnknownMember);
+    }
+
+    let mut found = false;
+    let mut i = 0usize;
+
+    while i < manager.member_roles.len() {
+        if manager.member_roles[i].0 == member_id {
+            manager.member_roles[i].1 = role;
+            found = true;
+            break;
+        }
+        i += 1;
+    }
+
+    if !found {
+        manager.member_roles.push((member_id, role));
+    }
+
+    Ok(())
+}
+
+impl MemberSK {
+    /// Count how many certified one-time keys remain unused.
+    pub fn remaining_signatures(&self) -> usize {
+        let mut count = 0usize;
+        let mut i = 0usize;
+
+        while i < self.certified_keys.len() {
+            if !self.certified_keys[i].used {
+                count += 1;
+            }
+            i += 1;
+        }
+
+        count
+    }
+}
+
+/// Verify only the manager's SPHINCS+ signature on the certificate.
+pub fn verify_manager_certificate_signature(
+    certificate: &MemberCertificate,
+    gpk: &GroupPK,
+) -> bool {
+    let cert_body = serialise_certificate_body(
+        certificate.certificate_id,
+        certificate.member_id,
+        certificate.key_id,
+        certificate.issued_epoch,
+        certificate.expiry_epoch,
+        certificate.role,
+        &certificate.pk_seed,
+        &certificate.wots_pk,
+    );
+
+    let ok = slh_verify::<Sha256Hasher>(
+        &cert_body,
+        &certificate.manager_signature,
+        gpk.as_sphincs_pk(),
+    );
+
+    ok
+}
+
+/// Check whether the certificate matches the expected member/key binding.
+pub fn verify_certificate_binding(
+    certificate: &MemberCertificate,
+    expected_member_id: u32,
+    expected_key_id: u32,
+) -> bool {
+    if certificate.member_id != expected_member_id {
+        return false;
+    }
+
+    if certificate.key_id != expected_key_id {
+        return false;
+    }
+
+    true
+}
+
+/// Check certificate metadata against a verification policy.
+pub fn verify_certificate_metadata(
+    certificate: &MemberCertificate,
+    policy: &CertificateValidationPolicy,
+) -> bool {
+    if certificate.issued_epoch > certificate.expiry_epoch {
+        return false;
+    }
+
+    if policy.current_epoch < certificate.issued_epoch {
+        return false;
+    }
+
+    if policy.current_epoch > certificate.expiry_epoch {
+        return false;
+    }
+
+    if policy.check_role {
+        if certificate.role != policy.required_role {
+            return false;
+        }
+    }
+
+    if revoked_certificate_list_contains(
+        &policy.revoked_certificate_ids,
+        certificate.certificate_id,
+    ) {
+        return false;
+    }
+
+    if revoked_member_list_contains(&policy.revoked_members, certificate.member_id) {
+        return false;
+    }
+
+    true
+}
+
+/// Full certificate check = manager signature + metadata policy.
+pub fn verify_certificate(
+    certificate: &MemberCertificate,
+    gpk: &GroupPK,
+    policy: &CertificateValidationPolicy,
+) -> bool {
+    let sig_ok = verify_manager_certificate_signature(certificate, gpk);
+
+    if !sig_ok {
+        return false;
+    }
+
+    let meta_ok = verify_certificate_metadata(certificate, policy);
+
+    if !meta_ok {
+        return false;
+    }
+
+    true
+}
+
+/// Sign with a specific certified key index.
+pub fn group_sign_with_key_index(
+    msg: &[u8],
+    member: &mut MemberSK,
+    key_index: usize,
+) -> Result<GroupSignature, GroupError> {
+    if key_index >= member.certified_keys.len() {
+        return Err(GroupError::BadKeyIndex);
+    }
+
+    let certified_key = &mut member.certified_keys[key_index];
+
+    if certified_key.used {
+        return Err(GroupError::NoUnusedCertifiedKey);
+    }
+
+    let msg_digest = hash_message_for_wots(msg);
+    let adrs = member_wots_adrs(member.member_id, certified_key.key_pair.key_id);
+
+    let wots_signature = wots::wots_sign::<Sha256Hasher>(
+        &msg_digest,
+        &certified_key.key_pair.sk_seed,
+        &certified_key.key_pair.pk_seed,
+        &adrs,
+    );
+
+    certified_key.used = true;
+
+    let group_signature = GroupSignature {
+        certificate: certified_key.certificate.clone(),
+        wots_signature: wots_signature,
+    };
+
+    Ok(group_signature)
+}
+
+/// Sign with the first unused certified key.
+pub fn group_sign(
+    msg: &[u8],
+    member: &mut MemberSK,
+) -> Result<GroupSignature, GroupError> {
+    let mut found = false;
+    let mut key_index = 0usize;
+    let mut i = 0usize;
+
+    while i < member.certified_keys.len() {
+        if !member.certified_keys[i].used {
+            found = true;
+            key_index = i;
+            break;
+        }
+        i += 1;
+    }
+
+    if !found {
+        return Err(GroupError::NoUnusedCertifiedKey);
+    }
+
+    group_sign_with_key_index(msg, member, key_index)
+}
+
+/// Verify using a very small default policy.
+pub fn group_verify(
+    msg: &[u8],
+    signature: &GroupSignature,
+    gpk: &GroupPK,
+) -> bool {
+    let policy = CertificateValidationPolicy::new(signature.certificate.issued_epoch);
+    let ok = group_verify_with_policy(msg, signature, gpk, &policy);
+    ok
+}
+
+/// Verify the full group signature under a given policy.
+pub fn group_verify_with_policy(
+    msg: &[u8],
+    signature: &GroupSignature,
+    gpk: &GroupPK,
+    policy: &CertificateValidationPolicy,
+) -> bool {
+    let cert_ok = verify_certificate(&signature.certificate, gpk, policy);
+
+    if !cert_ok {
+        return false;
+    }
+
+    let msg_digest = hash_message_for_wots(msg);
+    let member_id = signature.certificate.member_id;
+    let key_id = signature.certificate.key_id;
+    let adrs = member_wots_adrs(member_id, key_id);
+
+    let pk_from_sig = wots::wots_pk_from_sig::<Sha256Hasher>(
+        &signature.wots_signature,
+        &msg_digest,
+        &signature.certificate.pk_seed,
+        &adrs,
+    );
+
+    if pk_from_sig != signature.certificate.wots_pk {
+        return false;
+    }
+
+    true
+}
+
+/// Manager-side signer identification.
+pub fn group_identify_member(
+    msg: &[u8],
+    signature: &GroupSignature,
+    manager: &GroupManagerKey,
+) -> Option<u32> {
+    let temp_gpk = GroupPK {
+        manager_pk: manager.signing_pk.clone(),
+    };
+
+    let ok = group_verify(msg, signature, &temp_gpk);
+
+    if !ok {
+        return None;
+    }
+
+    let maybe_expected = get_member_from_certificate_id(
+        manager,
+        signature.certificate.certificate_id,
+    );
+
+    if maybe_expected.is_none() {
+        return None;
+    }
+
+    let expected = maybe_expected.unwrap();
+
+    if expected != signature.certificate.member_id {
+        return None;
+    }
+
+    Some(expected)
+}
+
+/// Serialise the full group signature.
+pub fn serialise_group_sig(sig: &GroupSignature) -> Vec<u8> {
+    let mut out = Vec::new();
+
+    out.extend_from_slice(&sig.certificate.certificate_id.to_be_bytes());
+    out.extend_from_slice(&sig.certificate.member_id.to_be_bytes());
+    out.extend_from_slice(&sig.certificate.key_id.to_be_bytes());
+    out.extend_from_slice(&sig.certificate.issued_epoch.to_be_bytes());
+    out.extend_from_slice(&sig.certificate.expiry_epoch.to_be_bytes());
+    out.push(sig.certificate.role);
+    out.extend_from_slice(&sig.certificate.pk_seed);
+    out.extend_from_slice(&sig.certificate.wots_pk);
+
+    let manager_sig_bytes = serialise_sig(&sig.certificate.manager_signature);
+    out.extend_from_slice(&manager_sig_bytes);
+
+    let mut i = 0usize;
+    while i < WOTS_LEN {
+        out.extend_from_slice(&sig.wots_signature[i]);
+        i += 1;
+    }
+
+    out
+}
+
+/// Read one big-endian u64 from `bytes` and move `pos` forward.
+fn read_u64_at(bytes: &[u8], pos: &mut usize) -> Option<u64> {
+    if *pos + 8 > bytes.len() {
+        return None;
+    }
+
+    let mut out = [0u8; 8];
+    out.copy_from_slice(&bytes[*pos..*pos + 8]);
+    *pos += 8;
+
+    Some(u64::from_be_bytes(out))
+}
+
+/// Read one big-endian u32 from `bytes` and move `pos` forward.
+fn read_u32_at(bytes: &[u8], pos: &mut usize) -> Option<u32> {
+    if *pos + 4 > bytes.len() {
+        return None;
+    }
+
+    let mut out = [0u8; 4];
+    out.copy_from_slice(&bytes[*pos..*pos + 4]);
+    *pos += 4;
+
+    Some(u32::from_be_bytes(out))
+}
+
+/// Read one N-byte array from `bytes` and move `pos` forward.
+fn read_n_array_at(bytes: &[u8], pos: &mut usize) -> Option<[u8; N]> {
+    if *pos + N > bytes.len() {
+        return None;
+    }
+
+    let mut out = [0u8; N];
+    out.copy_from_slice(&bytes[*pos..*pos + N]);
+    *pos += N;
+
+    Some(out)
+}
+
+/// Deserialise a full group signature from raw bytes.
+pub fn deserialise_group_sig(bytes: &[u8]) -> Option<GroupSignature> {
+    if bytes.len() != GROUP_SIG_BYTES {
+        return None;
+    }
+
+    let mut pos = 0usize;
+
+    let maybe_certificate_id = read_u64_at(bytes, &mut pos);
+    if maybe_certificate_id.is_none() {
+        return None;
+    }
+    let certificate_id = maybe_certificate_id.unwrap();
+
+    let maybe_member_id = read_u32_at(bytes, &mut pos);
+    if maybe_member_id.is_none() {
+        return None;
+    }
+    let member_id = maybe_member_id.unwrap();
+
+    let maybe_key_id = read_u32_at(bytes, &mut pos);
+    if maybe_key_id.is_none() {
+        return None;
+    }
+    let key_id = maybe_key_id.unwrap();
+
+    let maybe_issued_epoch = read_u64_at(bytes, &mut pos);
+    if maybe_issued_epoch.is_none() {
+        return None;
+    }
+    let issued_epoch = maybe_issued_epoch.unwrap();
+
+    let maybe_expiry_epoch = read_u64_at(bytes, &mut pos);
+    if maybe_expiry_epoch.is_none() {
+        return None;
+    }
+    let expiry_epoch = maybe_expiry_epoch.unwrap();
+
+    if pos >= bytes.len() {
+        return None;
+    }
+    let role = bytes[pos];
+    pos += 1;
+
+    let maybe_pk_seed = read_n_array_at(bytes, &mut pos);
+    if maybe_pk_seed.is_none() {
+        return None;
+    }
+    let pk_seed = maybe_pk_seed.unwrap();
+
+    let maybe_wots_pk = read_n_array_at(bytes, &mut pos);
+    if maybe_wots_pk.is_none() {
+        return None;
+    }
+    let wots_pk = maybe_wots_pk.unwrap();
+
+    if pos + SIG_BYTES > bytes.len() {
+        return None;
+    }
+    let maybe_manager_signature = deserialise_sig(&bytes[pos..pos + SIG_BYTES]);
+    if maybe_manager_signature.is_none() {
+        return None;
+    }
+    let manager_signature = maybe_manager_signature.unwrap();
+    pos += SIG_BYTES;
+
+    let mut wots_signature = [[0u8; N]; WOTS_LEN];
+    let mut i = 0usize;
+    while i < WOTS_LEN {
+        let maybe_chain_value = read_n_array_at(bytes, &mut pos);
+        if maybe_chain_value.is_none() {
+            return None;
+        }
+        wots_signature[i] = maybe_chain_value.unwrap();
+        i += 1;
+    }
+
+    let certificate = MemberCertificate {
+        certificate_id: certificate_id,
+        member_id: member_id,
+        key_id: key_id,
+        issued_epoch: issued_epoch,
+        expiry_epoch: expiry_epoch,
+        role: role,
+        pk_seed: pk_seed,
+        wots_pk: wots_pk,
+        manager_signature: manager_signature,
+    };
+
+    let signature = GroupSignature {
+        certificate: certificate,
+        wots_signature: wots_signature,
+    };
+
+    Some(signature)
+}
+
+/// Verify a raw encoded signature.
+pub fn group_verify_raw(msg: &[u8], sig_bytes: &[u8], gpk: &GroupPK) -> bool {
+    let maybe_sig = deserialise_group_sig(sig_bytes);
+
+    if maybe_sig.is_none() {
+        return false;
+    }
+
+    let sig = maybe_sig.unwrap();
+    let ok = group_verify(msg, &sig, gpk);
+    ok
+}
+
+/// Verify a raw encoded signature with policy.
+pub fn group_verify_raw_with_policy(
+    msg: &[u8],
+    sig_bytes: &[u8],
+    gpk: &GroupPK,
+    policy: &CertificateValidationPolicy,
+) -> bool {
+    let maybe_sig = deserialise_group_sig(sig_bytes);
+
+    if maybe_sig.is_none() {
+        return false;
+    }
+
+    let sig = maybe_sig.unwrap();
+    let ok = group_verify_with_policy(msg, &sig, gpk, policy);
+    ok
+}
+
+/// Identify a signer from raw bytes.
+pub fn group_identify_member_raw(
+    msg: &[u8],
+    sig_bytes: &[u8],
+    manager: &GroupManagerKey,
+) -> Option<u32> {
+    let maybe_sig = deserialise_group_sig(sig_bytes);
+
+    if maybe_sig.is_none() {
+        return None;
+    }
+
+    let sig = maybe_sig.unwrap();
+    group_identify_member(msg, &sig, manager)
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hash::RawSha256;
-    use crate::sphincs::{SIG_BYTES, serialise_sig};
 
     #[test]
-    fn group_sign_verify_roundtrip() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msg = b"UNSW 26T1 Applied Cryptography group sig test";
+    fn group_roundtrip_and_identify_member() {
+        let (mut manager, gpk) = group_keygen();
+        let mut member = add_member(&mut manager, 2).expect("member should be created");
+        let member_id = member.member_id;
 
-        for idx in [0u32, 1, 7, (1 << HP) - 1] {
-            let msk = derive_member_key(&manager, idx);
-            let sig = group_sign::<RawSha256>(msg, &msk);
-            assert!(
-                group_verify::<RawSha256>(msg, &sig, &gpk),
-                "group_verify failed for member {idx}"
-            );
-        }
-    }
+        let sig = group_sign(b"group roundtrip", &mut member).expect("signing should succeed");
 
-    #[test]
-    fn group_wrong_message_fails() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 0);
-        let sig = group_sign::<RawSha256>(b"correct", &msk);
-        assert!(!group_verify::<RawSha256>(b"wrong", &sig, &gpk));
-    }
-
-    #[test]
-    fn group_cross_group_fails() {
-        let (manager1, gpk1) = group_keygen::<RawSha256>();
-        let (_manager2, gpk2) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager1, 0);
-        let msg = b"cross group test";
-        let sig = group_sign::<RawSha256>(msg, &msk);
-        assert!(
-            group_verify::<RawSha256>(msg, &sig, &gpk1),
-            "valid sig rejected under own group"
+        assert!(group_verify(b"group roundtrip", &sig, &gpk));
+        assert_eq!(
+            group_identify_member(b"group roundtrip", &sig, &manager),
+            Some(member_id)
         );
-        assert!(
-            !group_verify::<RawSha256>(msg, &sig, &gpk2),
-            "sig accepted under different group"
+        assert_eq!(member.remaining_signatures(), 1);
+    }
+
+    #[test]
+    fn group_specific_key_index_is_one_time() {
+        let (mut manager, gpk) = group_keygen();
+        let mut member = add_member(&mut manager, 3).expect("member should be created");
+
+        let sig = group_sign_with_key_index(b"indexed", &mut member, 2)
+            .expect("indexed signing should succeed");
+
+        assert!(group_verify(b"indexed", &sig, &gpk));
+        assert_eq!(member.remaining_signatures(), 2);
+        assert!(matches!(
+            group_sign_with_key_index(b"indexed reuse", &mut member, 2),
+            Err(GroupError::NoUnusedCertifiedKey)
+        ));
+        assert!(matches!(
+            group_sign_with_key_index(b"bad index", &mut member, 99),
+            Err(GroupError::BadKeyIndex)
+        ));
+    }
+
+    #[test]
+    fn group_policy_enforces_role_expiry_and_revocation() {
+        let (mut manager, gpk) = group_keygen();
+        set_manager_epoch(&mut manager, 10);
+        set_default_certificate_validity(&mut manager, 1);
+
+        let mut member = add_member(&mut manager, 0).expect("member should be created");
+        let member_id = member.member_id;
+        set_member_role(&mut manager, member_id, 7).expect("role should be updated");
+        certify_new_keys_for_member(&mut manager, &mut member, 1)
+            .expect("new key should be certified");
+
+        let sig = group_sign(b"policy test", &mut member).expect("signing should succeed");
+
+        let mut ok_policy = CertificateValidationPolicy::new(10);
+        ok_policy.check_role = true;
+        ok_policy.required_role = 7;
+        assert!(group_verify_with_policy(b"policy test", &sig, &gpk, &ok_policy));
+
+        let mut wrong_role = ok_policy.clone();
+        wrong_role.required_role = 1;
+        assert!(!group_verify_with_policy(
+            b"policy test",
+            &sig,
+            &gpk,
+            &wrong_role
+        ));
+
+        let expired = CertificateValidationPolicy {
+            current_epoch: 12,
+            ..ok_policy.clone()
+        };
+        assert!(!group_verify_with_policy(
+            b"policy test",
+            &sig,
+            &gpk,
+            &expired
+        ));
+
+        let mut revoked_cert = ok_policy.clone();
+        revoked_cert
+            .revoked_certificate_ids
+            .push(sig.certificate.certificate_id);
+        assert!(!group_verify_with_policy(
+            b"policy test",
+            &sig,
+            &gpk,
+            &revoked_cert
+        ));
+
+        let mut revoked_member = ok_policy;
+        revoked_member.revoked_members.push(member_id);
+        assert!(!group_verify_with_policy(
+            b"policy test",
+            &sig,
+            &gpk,
+            &revoked_member
+        ));
+    }
+
+    #[test]
+    fn group_raw_roundtrip_and_tamper_rejection() {
+        let (mut manager, gpk) = group_keygen();
+        let mut member = add_member(&mut manager, 1).expect("member should be created");
+        let sig = group_sign(b"raw group", &mut member).expect("signing should succeed");
+        let raw = serialise_group_sig(&sig);
+
+        assert_eq!(raw.len(), GROUP_SIG_BYTES);
+        assert!(group_verify_raw(b"raw group", &raw, &gpk));
+
+        let parsed = deserialise_group_sig(&raw).expect("raw signature should parse");
+        assert_eq!(parsed.certificate.certificate_id, sig.certificate.certificate_id);
+        assert_eq!(parsed.certificate.member_id, sig.certificate.member_id);
+        assert_eq!(parsed.certificate.key_id, sig.certificate.key_id);
+
+        let mut tampered = raw.clone();
+        tampered[GROUP_SIG_BYTES - 1] ^= 0x01;
+        assert!(!group_verify_raw(b"raw group", &tampered, &gpk));
+
+        let truncated = &raw[..raw.len() - 1];
+        assert!(!group_verify_raw(b"raw group", truncated, &gpk));
+    }
+
+    #[test]
+    fn derive_member_key_supports_existing_members() {
+        let (mut manager, gpk) = group_keygen();
+        let member = add_member(&mut manager, 0).expect("member should be created");
+        let member_id = member.member_id;
+
+        let mut derived = derive_member_key(&mut manager, member_id, 1)
+            .expect("existing member should be derivable");
+        let sig =
+            group_sign(b"derived member", &mut derived).expect("derived member should sign");
+
+        assert!(group_verify(b"derived member", &sig, &gpk));
+        assert_eq!(
+            group_identify_member(b"derived member", &sig, &manager),
+            Some(member_id)
         );
+        assert!(matches!(
+            derive_member_key(&mut manager, member_id + 1_000, 1),
+            Err(GroupError::UnknownMember)
+        ));
+        assert!(matches!(
+            set_member_role(&mut manager, member_id + 1_000, 3),
+            Err(GroupError::UnknownMember)
+        ));
     }
 
     #[test]
-    fn group_raw_roundtrip() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 3);
-        let msg = b"raw group sig test";
-        let sig = group_sign::<RawSha256>(msg, &msk);
-        let sig_bytes = serialise_sig(&sig);
-        assert_eq!(sig_bytes.len(), SIG_BYTES);
-        assert!(group_verify_raw::<RawSha256>(msg, &sig_bytes, &gpk));
-    }
+    fn identify_member_requires_the_original_manager() {
+        let (mut manager_a, gpk_a) = group_keygen();
+        let (manager_b, _gpk_b) = group_keygen();
+        let mut member = add_member(&mut manager_a, 1).expect("member should be created");
+        let member_id = member.member_id;
 
-    #[test]
-    fn group_identify_correct_member() {
-        let (manager, _gpk) = group_keygen::<RawSha256>();
-        let msg = b"identify me";
+        let sig = group_sign(b"manager identity", &mut member).expect("signing should succeed");
 
-        for expected_idx in [0u32, 1, 5] {
-            let msk = derive_member_key(&manager, expected_idx);
-            let sig = group_sign::<RawSha256>(msg, &msk);
-            let found = group_identify_member::<RawSha256>(msg, &sig, &manager);
-            assert_eq!(
-                found,
-                Some(expected_idx),
-                "manager identified wrong member: got {found:?}, expected Some({expected_idx})"
-            );
-        }
-    }
-
-    #[test]
-    fn group_signatures_are_anonymous() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msg = b"anonymous message";
-        let msk0 = derive_member_key(&manager, 0);
-        let msk1 = derive_member_key(&manager, 1);
-
-        let sig0 = group_sign::<RawSha256>(msg, &msk0);
-        let sig1 = group_sign::<RawSha256>(msg, &msk1);
-
-        assert!(
-            group_verify::<RawSha256>(msg, &sig0, &gpk),
-            "sig0 should verify"
+        assert!(group_verify(b"manager identity", &sig, &gpk_a));
+        assert_eq!(
+            group_identify_member(b"manager identity", &sig, &manager_a),
+            Some(member_id)
         );
-        assert!(
-            group_verify::<RawSha256>(msg, &sig1, &gpk),
-            "sig1 should verify"
+        assert_eq!(
+            group_identify_member(b"manager identity", &sig, &manager_b),
+            None
         );
-
-        let bytes0 = serialise_sig(&sig0);
-        let bytes1 = serialise_sig(&sig1);
-        assert_ne!(
-            bytes0, bytes1,
-            "signatures from different members should differ"
-        );
-    }
-
-    #[test]
-    fn group_member_can_sign_multiple_messages() {
-        let (manager, gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 2);
-
-        let msgs: &[&[u8]] = &[b"msg one", b"msg two", b"msg three"];
-        for msg in msgs {
-            let sig = group_sign::<RawSha256>(msg, &msk);
-            assert!(
-                group_verify::<RawSha256>(msg, &sig, &gpk),
-                "member 2 failed to verify for: {}",
-                String::from_utf8_lossy(msg)
-            );
-        }
-    }
-
-    // check compute_group_root give the same root as keygen.
-    #[test]
-    fn compute_group_root_same_as_keygen() {
-        let (manager, _gpk) = group_keygen::<RawSha256>();
-        let again = compute_group_root::<RawSha256>(&manager.sk_seed, &manager.pk_seed);
-        assert_eq!(again, manager.group_root);
-    }
-
-    // search_r must find a r that make digest hit the target leaf.
-    #[test]
-    fn search_r_hits_target() {
-        let (manager, _gpk) = group_keygen::<RawSha256>();
-        let msk = derive_member_key(&manager, 4);
-        let msg = b"find target leaf";
-
-        let r = search_r::<RawSha256>(
-            msg,
-            &msk.sk_prf,
-            &msk.pk_seed,
-            &msk.group_root,
-            msk.member_index as u64,
-        )
-        .expect("search_r must hit within 2^16");
-        let digest = RawSha256::h_msg(&r, &msk.pk_seed, &msk.group_root, msg);
-        let (_, _, leaf) = split_digest(&digest);
-
-        assert_eq!(leaf, msk.member_index as u64);
     }
 }
