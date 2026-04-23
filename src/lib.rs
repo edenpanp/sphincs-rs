@@ -37,27 +37,25 @@
 //!
 //! ```rust,ignore
 //! use sphincs_rs::group::{
-//!     derive_member_key,
+//!     add_member,
 //!     group_keygen,
-//!     group_open,
 //!     group_sign,
 //!     group_verify,
 //! };
-//! use sphincs_rs::hash::Sha256Hasher;
 //!
-//! let (manager, gpk) = group_keygen::<Sha256Hasher>();
-//! let member_sk = derive_member_key::<Sha256Hasher>(&manager, 0);
+//! let (mut manager, gpk) = group_keygen();
+//! let mut member = add_member(&mut manager, 1).unwrap();
 //!
-//! let sig = group_sign::<Sha256Hasher>(b"hello group", &member_sk);
+//! let sig = group_sign(b"hello group", &mut member).unwrap();
 //!
-//! assert!(group_verify::<Sha256Hasher>(b"hello group", &sig, &gpk));
-//! assert_eq!(group_open::<Sha256Hasher>(b"hello group", &sig, &manager), Some(0));
+//! assert!(group_verify(b"hello group", &sig, &gpk));
 //! ```
 //!
-//! current group module uses a top-level XMSS tree as the group public key:
-//! - manager owns the tree seed and distributes member signing material
+//! current group module issues manager-signed certificates for one-time WOTS+
+//! member keys:
+//! - manager adds members and certifies their one-time public keys
 //! - member signatures verify under the group public key
-//! - manager can open the signer index for a valid group signature
+//! - manager can identify the signer from the certificate registry
 //!
 //! ## Optimisations
 //!

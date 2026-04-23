@@ -211,7 +211,7 @@ pub fn wots_pk_from_sig<S: SphincsHasher>(
 mod tests {
     use super::*;
     use crate::hash::RawSha256;
-    use rand::{RngCore, rngs::OsRng};
+    use rand::{rngs::OsRng, RngCore};
 
     /// End-to-end WOTS+ round-trip: sign then verify.
     #[test]

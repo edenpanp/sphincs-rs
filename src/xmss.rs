@@ -284,7 +284,7 @@ pub fn xmss_pk_from_sig<S: SphincsHasher>(
 mod tests {
     use super::*;
     use crate::hash::RawSha256;
-    use rand::{RngCore, rngs::OsRng};
+    use rand::{rngs::OsRng, RngCore};
 
     fn rng_n() -> [u8; N] {
         let mut b = [0u8; N];
@@ -295,7 +295,7 @@ mod tests {
     /// Baseline and fast strategies must produce the same root.
     #[test]
     fn xmss_fast_root_matches_baseline() {
-        let (sk, pk) = (rng_n(), rng_n());
+        let (sk, pk, _msg) = (rng_n(), rng_n(), rng_n());
         let adrs = Adrs::new(AdrsType::TreeNode);
 
         let root_baseline = xmss_node::<RawSha256>(&sk, 0, HP, &pk, adrs);

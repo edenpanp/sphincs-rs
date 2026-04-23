@@ -1,24 +1,14 @@
-//! integration tests for sphincs-rs
-//!
-//! these tests require the `test-utils` feature to access `RawSha256`
-//!
-//! run with:
-//!   cargo test --features test-utils --test integration
-
-// gate the entire file so `cargo test` (without features) skips it cleanly
-#![cfg(feature = "test-utils")]
-
 use sphincs_rs::group::{
-    compute_group_root, derive_member_key, group_keygen, search_r,
+    add_member, certify_new_keys_for_member, group_identify_member, group_keygen, group_sign,
+    group_verify, group_verify_raw, group_verify_with_policy, serialise_group_sig,
+    set_manager_epoch, set_member_role, CertificateValidationPolicy,
 };
-use sphincs_rs::hash::{RawSha256, Sha256Hasher, SphincsHasher};
+use sphincs_rs::hash::{RawSha256, Sha256Hasher};
 use sphincs_rs::params::N;
 use sphincs_rs::sphincs::{
-    SIG_BYTES, deserialise_sig, serialise_sig, slh_keygen_fast, slh_sign_fast, slh_sign_raw_fast,
-    slh_verify, slh_verify_raw,
+    deserialise_sig, serialise_sig, slh_keygen_fast, slh_sign_fast, slh_sign_raw_fast, slh_verify,
+    slh_verify_raw, SphincsPK, SIG_BYTES,
 };
-
-// ── Helper macro ──────────────────────────────────────────────────────────────
 
 macro_rules! test_with_hasher {
     ($H:ty, $name:literal) => {{
@@ -26,49 +16,40 @@ macro_rules! test_with_hasher {
         let (sk, pk) = slh_keygen_fast::<$H>();
         let msg = b"UNSW 26T1 Applied Cryptography integration test";
 
-        // 1. sign + verify
         let sig = slh_sign_fast::<$H>(msg, &sk);
         assert!(
             slh_verify::<$H>(msg, &sig, &pk),
             "[{tag}] valid sig rejected"
         );
-
-        // 2. wrong message
         assert!(
             !slh_verify::<$H>(b"wrong", &sig, &pk),
-            "[{tag}] wrong msg accepted"
+            "[{tag}] wrong message accepted"
         );
 
-        // 3. serialise → deserialise → verify
         let raw = serialise_sig(&sig);
-        assert_eq!(raw.len(), SIG_BYTES, "[{tag}] wrong length: {}", raw.len());
-        let sig2 = deserialise_sig(&raw).unwrap();
+        assert_eq!(raw.len(), SIG_BYTES, "[{tag}] wrong serialised length");
+        let sig2 = deserialise_sig(&raw).expect("signature should round-trip");
         assert!(
             slh_verify::<$H>(msg, &sig2, &pk),
             "[{tag}] deserialised sig rejected"
         );
 
-        // 4. raw API
         let raw_sig = slh_sign_raw_fast::<$H>(msg, &sk);
         assert!(
             slh_verify_raw::<$H>(msg, &raw_sig, &pk),
-            "[{tag}] raw verify failed"
+            "[{tag}] raw API verify failed"
         );
 
-        // 5. determinism: same msg → same R
         let sig_b = slh_sign_fast::<$H>(msg, &sk);
         assert_eq!(sig.r, sig_b.r, "[{tag}] R is not deterministic");
 
-        // 6. cross-key rejection
         let (_, pk2) = slh_keygen_fast::<$H>();
         assert!(
             !slh_verify::<$H>(msg, &sig, &pk2),
-            "[{tag}] wrong pk accepted"
+            "[{tag}] wrong public key accepted"
         );
     }};
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[test]
 fn integration_raw_sha256() {
@@ -85,27 +66,24 @@ fn integration_cross_hasher_rejects() {
     let msg = b"cross-hasher forgery attempt";
     let (sk_raw, pk_raw) = slh_keygen_fast::<RawSha256>();
     let raw_sig = slh_sign_raw_fast::<RawSha256>(msg, &sk_raw);
-    // Use the same pk_seed/pk_root but verify with the *other* hasher.
-    let pk_sha = sphincs_rs::sphincs::SphincsPK {
+    let pk_sha = SphincsPK {
         pk_seed: pk_raw.pk_seed,
         pk_root: pk_raw.pk_root,
     };
+
     assert!(!slh_verify_raw::<Sha256Hasher>(msg, &raw_sig, &pk_sha));
 }
 
 #[test]
-fn integration_empty_message() {
+fn integration_empty_and_long_messages() {
     let (sk, pk) = slh_keygen_fast::<RawSha256>();
-    let sig = slh_sign_fast::<RawSha256>(b"", &sk);
-    assert!(slh_verify::<RawSha256>(b"", &sig, &pk));
-}
 
-#[test]
-fn integration_long_message() {
-    let (sk, pk) = slh_keygen_fast::<RawSha256>();
-    let msg = vec![0x42u8; 65536];
-    let sig = slh_sign_fast::<RawSha256>(&msg, &sk);
-    assert!(slh_verify::<RawSha256>(&msg, &sig, &pk));
+    let empty_sig = slh_sign_fast::<RawSha256>(b"", &sk);
+    assert!(slh_verify::<RawSha256>(b"", &empty_sig, &pk));
+
+    let long_msg = vec![0x42u8; 65_536];
+    let long_sig = slh_sign_fast::<RawSha256>(&long_msg, &sk);
+    assert!(slh_verify::<RawSha256>(&long_msg, &long_sig, &pk));
 }
 
 #[test]
@@ -118,18 +96,19 @@ fn integration_bit_flip_rejection() {
         0,
         N,
         N + 100,
-        N + 1000,
+        N + 1_000,
         SIG_BYTES / 2,
         SIG_BYTES - 200,
         SIG_BYTES - 32,
         SIG_BYTES - 1,
     ];
-    for &pos in &positions {
+
+    for pos in positions {
         let mut tampered = raw.clone();
         tampered[pos] ^= 0xFF;
         assert!(
             !slh_verify_raw::<RawSha256>(msg, &tampered, &pk),
-            "bit-flip at pos {pos} not detected"
+            "bit flip at pos {pos} was not detected"
         );
     }
 }
@@ -142,16 +121,17 @@ fn integration_multiple_keypairs() {
         .iter()
         .map(|(sk, _)| slh_sign_fast::<RawSha256>(msg, sk))
         .collect();
-    for (i, ((_, pki), sigi)) in pairs.iter().zip(sigs.iter()).enumerate() {
+
+    for (i, ((_, own_pk), sig)) in pairs.iter().zip(sigs.iter()).enumerate() {
         assert!(
-            slh_verify::<RawSha256>(msg, sigi, pki),
-            "keypair {i}: own sig failed"
+            slh_verify::<RawSha256>(msg, sig, own_pk),
+            "keypair {i}: own signature failed"
         );
-        for (j, (_, pkj)) in pairs.iter().enumerate() {
+        for (j, (_, other_pk)) in pairs.iter().enumerate() {
             if i != j {
                 assert!(
-                    !slh_verify::<RawSha256>(msg, sigi, pkj),
-                    "sig {i} accepted under pk {j}"
+                    !slh_verify::<RawSha256>(msg, sig, other_pk),
+                    "signature {i} accepted under public key {j}"
                 );
             }
         }
@@ -161,31 +141,36 @@ fn integration_multiple_keypairs() {
 #[test]
 fn sig_bytes_constant_correct() {
     use sphincs_rs::params::{A, D, HP, K, WOTS_LEN};
+
     let expected = N + K * (1 + A) * N + D * (WOTS_LEN + HP) * N;
     assert_eq!(SIG_BYTES, expected);
-    assert_eq!(SIG_BYTES, 29792);
+    assert_eq!(SIG_BYTES, 29_792);
 }
 
-// rebuild group root and check it equal to keygen result.
 #[test]
-fn group_root_helper_matches_keygen() {
-    let (manager, gpk) = group_keygen::<RawSha256>();
-    let again = compute_group_root::<RawSha256>(&manager.master_seed, &manager.pk_seed);
-    assert_eq!(again, manager.group_root);
-    assert_eq!(again, gpk.group_root);
-}
+fn integration_group_public_api_roundtrip() {
+    let (mut manager, gpk) = group_keygen();
+    set_manager_epoch(&mut manager, 3);
 
-// search_r must land on the member's target leaf.
-#[test]
-fn group_search_r_hits_target() {
-    let (manager, _gpk) = group_keygen::<RawSha256>();
-    let m = derive_member_key::<RawSha256>(&manager, 3);
-    let msg = b"group randomizer helper integration";
+    let mut member = add_member(&mut manager, 0).expect("member should be created");
+    let member_id = member.member_id;
+    set_member_role(&mut manager, member_id, 4).expect("role should be assigned");
+    certify_new_keys_for_member(&mut manager, &mut member, 1).expect("new key should be certified");
 
-    let r = search_r::<RawSha256>(msg, &m.sk_prf, &m.pk_seed, &m.group_root, m.member_index as u64)
-        .expect("search_r must hit");
-    let d = RawSha256::h_msg(&r, &m.pk_seed, &m.group_root, msg);
-    let (_, _, leaf) = sphincs_rs::digest::split_digest(&d);
+    let msg = b"group integration roundtrip";
+    let sig = group_sign(msg, &mut member).expect("group signing should succeed");
+    assert!(group_verify(msg, &sig, &gpk));
 
-    assert_eq!(leaf, m.member_index as u64);
+    let raw = serialise_group_sig(&sig);
+    assert!(group_verify_raw(msg, &raw, &gpk));
+    assert_eq!(group_identify_member(msg, &sig, &manager), Some(member_id));
+
+    let mut policy = CertificateValidationPolicy::new(3);
+    policy.check_role = true;
+    policy.required_role = 4;
+    assert!(group_verify_with_policy(msg, &sig, &gpk, &policy));
+
+    let mut wrong_role = policy.clone();
+    wrong_role.required_role = 1;
+    assert!(!group_verify_with_policy(msg, &sig, &gpk, &wrong_role));
 }
