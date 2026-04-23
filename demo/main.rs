@@ -2,8 +2,9 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use sphincs_rs::group::{
-    GroupRevocationList, derive_member_key, group_keygen, group_open, group_sign,
-    group_verify, group_verify_not_revoked,
+    CertificateValidationPolicy, add_member, certify_new_keys_for_member, group_identify_member,
+    group_keygen, group_sign, group_verify, group_verify_with_policy, serialise_group_sig,
+    set_manager_epoch, set_member_role,
 };
 use sphincs_rs::hash::{RawSha256, Sha256Hasher, SphincsHasher};
 use sphincs_rs::params::{A, D, H, HP, K, N, W, WOTS_LEN};
@@ -25,7 +26,7 @@ fn main() -> io::Result<()> {
     }
 
     if prompt_group_demo()? {
-        run_group_demo::<RawSha256>(&message);
+        run_group_demo(&message);
     } else {
         println!();
         println!("Part B skipped by user. The report documents the group tests and benchmarks.");
@@ -56,7 +57,7 @@ fn print_header() {
     println!("  2. rejection after message and signature tampering");
     println!("  3. raw signature size and parameter choices");
     println!("  4. optimised signing path used by this implementation");
-    println!("  5. experimental group-signature verify + manager open/revoke check");
+    println!("  5. experimental group extension: verify + identify + policy checks");
     println!("============================================================");
     println!("Recommended command:");
     println!("  cargo run --release --example demo");
@@ -161,32 +162,46 @@ fn run_signature_demo<S: SphincsHasher>(backend_name: &str, message: &[u8]) {
     println!("Raw-byte signature round trip: {}", pass(raw_valid));
 }
 
-fn run_group_demo<S: SphincsHasher>(message: &[u8]) {
+fn run_group_demo(message: &[u8]) {
     println!();
     println!("Part B - Experimental Group Extension");
     println!("------------------------------------------------------------");
     println!("Scope note: this is an experimental group-style extension,");
-    println!("not the full DGSP protocol with join, public revocation, judge,");
-    println!("and certificate lifecycle support.");
-    println!("Backend: RawSha256 demo backend for live demonstration speed.");
+    println!("not the full DGSP protocol with join, public revocation infrastructure,");
+    println!("judge, or stateful certificate lifecycle support.");
+    println!("Backend: manager-signed certificates over one-time WOTS+ member keys.");
 
-    let member_index = 7u32;
-    let (setup_time, (manager, gpk)) = timed(group_keygen::<S>);
-    let member_sk = derive_member_key::<S>(&manager, member_index);
+    let (setup_time, (mut manager, gpk)) = timed(group_keygen);
+    set_manager_epoch(&mut manager, 3);
+    let (member_time, mut member) = timed(|| {
+        let mut member = add_member(&mut manager, 0).expect("member should be created");
+        let member_id = member.member_id;
+        set_member_role(&mut manager, member_id, 4).expect("role should be assigned");
+        certify_new_keys_for_member(&mut manager, &mut member, 1)
+            .expect("new key should be certified");
+        member
+    });
 
-    let (sign_time, group_sig) = timed(|| group_sign::<S>(message, &member_sk));
-    let (verify_time, group_valid) = timed(|| group_verify::<S>(message, &group_sig, &gpk));
-    let (open_time, opened) = timed(|| group_open::<S>(message, &group_sig, &manager));
-    let mut revocations = GroupRevocationList::new();
-    let verify_before_revoke =
-        group_verify_not_revoked::<S>(message, &group_sig, &gpk, &manager, &revocations);
-    revocations.revoke(member_index);
-    let verify_after_revoke =
-        group_verify_not_revoked::<S>(message, &group_sig, &gpk, &manager, &revocations);
+    let member_id = member.member_id;
+    let (sign_time, group_sig) =
+        timed(|| group_sign(message, &mut member).expect("group signing should succeed"));
+    let raw = serialise_group_sig(&group_sig);
+    let (verify_time, group_valid) = timed(|| group_verify(message, &group_sig, &gpk));
+    let (identify_time, identified) =
+        timed(|| group_identify_member(message, &group_sig, &manager));
 
-    println!("Group setup capacity: {} members", manager.max_members);
-    println!("Chosen signer: member #{member_index}");
-    println!("Group setup time: {}", fmt_duration(setup_time));
+    let mut allow_policy = CertificateValidationPolicy::new(3);
+    allow_policy.check_role = true;
+    allow_policy.required_role = 4;
+    let allow_valid = group_verify_with_policy(message, &group_sig, &gpk, &allow_policy);
+
+    let mut deny_policy = allow_policy.clone();
+    deny_policy.revoked_members.push(member_id);
+    let deny_valid = group_verify_with_policy(message, &group_sig, &gpk, &deny_policy);
+
+    println!("Member created: #{member_id}");
+    println!("Manager setup time: {}", fmt_duration(setup_time));
+    println!("Member provisioning time: {}", fmt_duration(member_time));
     println!("Group signing time: {}", fmt_duration(sign_time));
     println!(
         "Public group verification: {} ({})",
@@ -194,22 +209,17 @@ fn run_group_demo<S: SphincsHasher>(message: &[u8]) {
         fmt_duration(verify_time)
     );
     println!(
-        "Manager opens signer: {} ({})",
-        match opened {
-            Some(idx) if idx == member_index => format!("PASS -> member #{idx}"),
+        "Manager identifies signer: {} ({})",
+        match identified {
+            Some(idx) if idx == member_id => format!("PASS -> member #{idx}"),
             Some(idx) => format!("FAIL -> member #{idx}"),
             None => "FAIL -> no member found".to_string(),
         },
-        fmt_duration(open_time)
+        fmt_duration(identify_time)
     );
-    println!(
-        "Manager verify_not_revoked before revoke: {}",
-        pass(verify_before_revoke)
-    );
-    println!(
-        "Manager verify_not_revoked after revoke: {}",
-        pass(!verify_after_revoke)
-    );
+    println!("Raw group signature length: {} bytes", raw.len());
+    println!("Policy check with required role=4: {}", pass(allow_valid));
+    println!("Policy check after member revocation: {}", pass(!deny_valid));
 }
 
 fn print_parameters() {
@@ -223,7 +233,8 @@ fn print_close() {
     println!("------------------------------------------------------------");
     println!("The demo exercised the main project deliverables: modular");
     println!("SPHINCS+ signing, raw serialisation, tamper rejection, the");
-    println!("optimised tree path, and the experimental group extension.");
+    println!("optimised tree path, and the experimental certificate-backed");
+    println!("group extension.");
     println!();
     println!("For benchmarks, run:");
     println!("  cargo bench --features test-utils");

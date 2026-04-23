@@ -14,8 +14,8 @@ Suggested live-demo choices:
 
 The demo prints the project motivation, SPHINCS+ parameters, key/sign/verify
 timings, signature size, tamper-rejection checks, raw-byte verification, and
-experimental group verification plus manager-side opening and revocation-policy
-checks.
+experimental group-member provisioning, public verification, manager-side
+signer identification, and policy-based rejection checks.
 
 This is intended to satisfy the report-demo requirement rather than only show a
 happy-path API call. It demonstrates:
@@ -27,5 +27,5 @@ happy-path API call. It demonstrates:
 - Concrete output: key sizes, signature size, parameters, and runtime are
   printed for the marker.
 - Extension scope: the group section is explicitly labelled experimental and
-  shows public verification, manager-side opening, and a minimal revocation
-  policy check without claiming full DGSP support.
+  shows public verification, manager-side signer identification, and a minimal
+  certificate-policy check without claiming full DGSP support.

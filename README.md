@@ -17,13 +17,13 @@ Implemented core components:
 - Hypertree signing and verification.
 - Top-level SPHINCS+ key generation, signing, verification, and raw
   serialisation helpers.
-- Experimental group-style signing, public verification, manager-side opening,
-  and a minimal revocation-policy check.
+- Experimental certificate-backed group-style signing built from manager-signed
+  SPHINCS+ certificates and member-side WOTS+ one-time keys.
 
 Important limitation: `src/group.rs` is an experimental extension. It is not a
-complete DGSP implementation because it does not implement full join, public
-revocation infrastructure, judge, or stateful certificate-lifecycle
-operations.
+complete DGSP implementation because it does not implement the full paper
+protocol for join, public opening proofs (`judge`), encrypted tracing tokens, or
+stateful certificate-lifecycle operations beyond local key/certificate tracking.
 
 ## Parameters
 
@@ -100,7 +100,8 @@ cargo run --release --example demo
 The demo prints the motivation for SPHINCS+ / SLH-DSA, selected parameters,
 key/sign/verify timings, signature size, message tampering rejection,
 signature-bit-flip rejection, raw-byte verification, and the experimental group
-verification plus manager-side opening and revocation-policy workflow.
+workflow for member provisioning, public verification, manager-side signer
+identification, and policy-based rejection.
 
 For a live marking run, use the default message, choose `1` for the faster
 `RawSha256` demo backend, and choose `y` for the group-extension section.

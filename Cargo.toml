@@ -22,3 +22,7 @@ rand = "0.8"
 name = "sphincs_bench"
 harness = false
 required-features = ["test-utils"]
+
+[[example]]
+name = "demo"
+path = "demo/main.rs"

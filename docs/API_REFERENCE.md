@@ -141,7 +141,10 @@ SIG_BYTES = 29792
 
 The group-signature API is experimental. It is not part of the main evaluated
 SPHINCS+ core, so it should be read as extra work rather than as a complete
-DGSP implementation. In particular, the current API demonstrates group-style
-signing, public verification, manager-side opening, and a minimal revocation
-policy check, but not full join, public revocation infrastructure, judge, or
-certificate lifecycle support.
+DGSP implementation. In particular, the current API demonstrates a
+certificate-backed group-style workflow: manager key generation, member
+provisioning, one-time WOTS+ signing under a manager-issued SPHINCS+
+certificate, public verification, manager-side signer identification, and
+metadata-policy checks. It does not yet implement the full DGSP join protocol,
+public opening proofs, encrypted tracing tokens, or the paper's complete
+certificate lifecycle.

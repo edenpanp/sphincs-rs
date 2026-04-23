@@ -68,8 +68,7 @@ All 10 integration tests passed in the recorded clean run. [`tests/integration.r
 | `integration_bit_flip_rejection` | single-bit flips at 8 positions across the signature all cause verification failure | PASS |
 | `integration_multiple_keypairs` | 3 keypairs; each sig validates under its own key and fails under the other two | PASS |
 | `sig_bytes_constant_correct` | `SIG_BYTES` == `N + K*(1+A)*N + D*(WOTS_LEN+HP)*N` == 29 792 | PASS |
-| `group_root_helper_matches_keygen` | `compute_group_root` reproduces the root from `group_keygen` | PASS |
-| `group_search_r_hits_target` | `search_r` lands on the expected leaf index for member 3 | PASS |
+| `integration_group_public_api_roundtrip` | member provisioning, public verify, raw verify, signer identification, and role policy checks all succeed together | PASS |
 
 A few of these are worth calling out:
 
@@ -77,6 +76,7 @@ A few of these are worth calling out:
 - `integration_bit_flip_rejection` samples tampering in different parts of the signature and confirms verification fails
 - `sig_bytes_constant_correct` independently recomputes the expected signature size from the parameters
 - `integration_multiple_keypairs` checks that signatures only verify under the correct public key
+- `integration_group_public_api_roundtrip` exercises the current certificate-backed group workflow rather than the older fixed-leaf prototype helpers
 
 The separate baseline-vs-alpha integration and timing comparison is documented in [ALPHA_COMPARISON_REPORT.md](./ALPHA_COMPARISON_REPORT.md).
 
