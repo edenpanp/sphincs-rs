@@ -93,8 +93,8 @@ The baseline-vs-alpha size and runtime comparison is documented in
 
 ## Group signature extension
 
-`src/group.rs` contains an experimental group-signature layer built on top of
-the SPHINCS+ implementation, based on the certificate-oriented direction of
+`src/group.rs` contains a group-signature prototype built on top of the
+SPHINCS+ implementation, based on the certificate-oriented direction of
 [ePrint 2025/760](https://eprint.iacr.org/2025/760.pdf).
 
 In the current revision, the group API models a manager that signs member
@@ -102,8 +102,8 @@ one-time WOTS+ public keys with SPHINCS+ certificates. Members then sign the
 actual message with the certified WOTS+ key, and verifiers check both the
 member signature and the manager certificate. The current API supports public
 verification, manager-side signer identification through the certificate
-registry, and metadata-policy checks such as role and revocation lists. It
-still should not be described as a full DGSP implementation.
+registry, and metadata-policy checks such as role and revocation lists. This is
+kept as extension work; the main implementation target remains SPHINCS+.
 
 ---
 

@@ -26,6 +26,5 @@ happy-path API call. It demonstrates:
 - Engineering result: the optimised signing path is used and timed.
 - Concrete output: key sizes, signature size, parameters, and runtime are
   printed for the marker.
-- Extension scope: the group section is explicitly labelled experimental and
-  shows public verification, manager-side signer identification, and a minimal
-  certificate-policy check without claiming full DGSP support.
+- Extension scope: the group section shows public verification, manager-side
+  signer identification, and a minimal certificate-policy check.

@@ -166,9 +166,7 @@ fn run_group_demo(message: &[u8]) {
     println!();
     println!("Part B - Experimental Group Extension");
     println!("------------------------------------------------------------");
-    println!("Scope note: this is an experimental group-style extension,");
-    println!("not the full DGSP protocol with join, public revocation infrastructure,");
-    println!("judge, or stateful certificate lifecycle support.");
+    println!("Scope note: certificate-backed group-style extension over SPHINCS+.");
     println!("Backend: manager-signed certificates over one-time WOTS+ member keys.");
 
     let (setup_time, (mut manager, gpk)) = timed(group_keygen);

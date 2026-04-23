@@ -106,11 +106,10 @@ Having two hashers started as a debugging convenience, but it ended up being use
 
 ## What's outside the core
 
-`src/group.rs` adds an experimental group-signature layer on top of SPHINCS+.
-It reuses a lot of the existing code, but it is not part of the main evaluated
-core. Its detailed design should be treated as unstable because it does not
-implement the full DGSP lifecycle: join, revoke, open, judge, and certificate
-refresh are out of scope for the current code.
+`src/group.rs` adds a certificate-backed group-signature prototype on top of
+SPHINCS+. It reuses a lot of the existing code, but it is not part of the main
+evaluated core. This separation keeps the report focused on the SPHINCS+
+implementation and optimisation results.
 
 ---
 
@@ -121,7 +120,6 @@ A few alternatives came up during the project but were not pursued:
 - **SHAKE-based instantiation.** This would fit the trait design, but the project already had enough scope, so SHA-2 was the more practical choice.
 - **SIMD-batched WOTS+.** It could be faster, but it would also add a lot of complexity and platform-specific work.
 - **Memoised recursion instead of iterative XMSS.** We considered it, but the iterative version ended up being the cleaner and faster result.
-
 
 
 

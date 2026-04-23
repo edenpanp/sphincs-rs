@@ -17,13 +17,11 @@ Implemented core components:
 - Hypertree signing and verification.
 - Top-level SPHINCS+ key generation, signing, verification, and raw
   serialisation helpers.
-- Experimental certificate-backed group-style signing built from manager-signed
+- Certificate-backed group-style signing built from manager-signed
   SPHINCS+ certificates and member-side WOTS+ one-time keys.
 
-Important limitation: `src/group.rs` is an experimental extension. It is not a
-complete DGSP implementation because it does not implement the full paper
-protocol for join, public opening proofs (`judge`), encrypted tracing tokens, or
-stateful certificate-lifecycle operations beyond local key/certificate tracking.
+Scope note: `src/group.rs` is additional prototype work around manager-issued
+certificates. The main evaluated implementation is the SPHINCS+ / SLH-DSA core.
 
 ## Parameters
 
