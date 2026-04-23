@@ -1,0 +1,36 @@
+pub const RANDOMIZE_SIGNATURES: bool = true;
+
+pub const PARAMETER_LENGTH_N: usize = 32;
+
+pub const WINTERNITZ_PARAMETER: usize = 16;
+
+pub const HYPERTREE_HEIGHT: usize = 64;
+pub const HYPERTREE_LAYERS: usize = 8;
+
+pub const FORS_TREES_NUMBER: usize = 22;
+pub const FORS_TREE_HEIGHT: usize = 14;
+
+pub const DEBUG_MODE: bool = true;
+
+const LOG_W: usize = WINTERNITZ_PARAMETER.ilog2() as usize;
+
+pub const WOTS_LENGTH_1: usize = (8 * PARAMETER_LENGTH_N + LOG_W - 1) / LOG_W;
+
+pub const WOTS_LENGTH_2: usize = ((WOTS_LENGTH_1 * (WINTERNITZ_PARAMETER - 1)).ilog2() as usize / LOG_W) + 1;
+pub const WOTS_TOTAL_LENGTH: usize = WOTS_LENGTH_1 + WOTS_LENGTH_2;
+
+pub const XMSS_SUBTREE_HEIGHT: usize = HYPERTREE_HEIGHT / HYPERTREE_LAYERS;
+
+pub const FORS_LEAVES: usize = 1 << FORS_TREE_HEIGHT;
+
+pub const FORS_SIGNATURE_LENGTH: usize = FORS_TREES_NUMBER * (FORS_TREE_HEIGHT + 1) * PARAMETER_LENGTH_N;
+
+pub const XMSS_SIGNATURE_LENGTH: usize = (WOTS_TOTAL_LENGTH + XMSS_SUBTREE_HEIGHT) * PARAMETER_LENGTH_N;
+
+pub const HYPERTREE_SIGNATURE_LENGTH: usize = HYPERTREE_LAYERS * XMSS_SIGNATURE_LENGTH;
+
+pub const TOTAL_SIGNATURE_LENGTH: usize = PARAMETER_LENGTH_N + FORS_SIGNATURE_LENGTH + HYPERTREE_SIGNATURE_LENGTH;
+
+pub const PUBLIC_KEY_LENGTH: usize = 2 * PARAMETER_LENGTH_N;
+
+pub const SECRET_KEY_LENGTH: usize = 4 * PARAMETER_LENGTH_N;

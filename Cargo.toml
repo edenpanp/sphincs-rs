@@ -1,28 +1,9 @@
 [package]
-name = "sphincs-rs"
+name = "comp6453"
 version = "0.1.0"
-edition = "2024"
-
-[features]
-test-utils = []
-parallel = ["dep:rayon"]
+edition = "2021"
 
 [dependencies]
-hex = "0.4.3"
 rand = "0.8"
-rayon = { version = "1.10", optional = true }
-sha2 = "0.10.9"
-
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-hex = "0.4.3"
-rand = "0.8"
-
-[[bench]]
-name = "sphincs_bench"
-harness = false
-required-features = ["test-utils"]
-
-[[example]]
-name = "demo"
-path = "demo/main.rs"
+rand_core = "0.6"
+tiny-keccak = { version = "2", features = ["shake"] }
