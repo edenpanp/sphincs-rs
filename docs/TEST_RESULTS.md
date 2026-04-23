@@ -27,13 +27,12 @@ cargo test --test kat
 | `cargo test --features test-utils --lib` | 52 library tests discovered; PASS in the current clean run |
 | `cargo test` | PASS in the recorded clean run |
 | `cargo test --features test-utils --test integration` | PASS — 8/8 |
-| `cargo test --test kat` | PASS — 3 parser/format checks pass; 2 interoperability checks are ignored |
+| `cargo test --test kat` | PASS — 5/5, including bundled reference-vector verification |
 
 The repository currently contains 75 `#[test]` markers across `src/` and
-`tests/`. Of these, 63 are exercised by the normal Cargo commands listed above:
-52 library tests, 8 integration tests, and 3 currently active KAT tests. The remaining
-6 are in `src/group_impl_helpers.rs`, which is not currently included by
-`src/lib.rs`, and 2 KAT interoperability checks are present but ignored.
+`tests/`. Of these, 65 are exercised by the normal Cargo commands listed above:
+52 library tests, 8 integration tests, and 5 KAT tests. The remaining 6 are in
+`src/group_impl_helpers.rs`, which is not currently included by `src/lib.rs`.
 
 ---
 
@@ -84,9 +83,9 @@ The separate baseline-vs-alpha integration and timing comparison is documented i
 ## KAT / real data
 
 A bundled `.rsp` file is included in the repo at `tests/PQCsignKAT_128.rsp`. It
-contains 100 records in the standard NIST PQC response-file format, so it is
-still useful as external-format input even though full interoperability with
-those reference signatures is not yet claimed by this repository.
+contains 100 records in the standard NIST PQC response-file format, and it is
+used both as external-format input and as a bundled interoperability check for
+the SHA2-256s-simple implementation in this repository.
 
 Each record has the standard NIST PQC format:
 - `count` — record index (0 through 99)
@@ -114,11 +113,11 @@ mkdir -p tests/kat
 cp tests/PQCsignKAT_128.rsp tests/kat/sphincs-sha2-256s-simple.rsp
 ```
 
-However, the current status is:
+The current status is:
 
-- `kat_verify_sample_records` exists but is ignored because the bundled reference signatures do not yet verify under the current SHA2 backend.
-- `kat_verify_first_ten_records` is also ignored; it is both long-running and blocked on the same interoperability mismatch.
+- `kat_verify_sample_records` verifies the first three bundled records.
+- `kat_verify_first_ten_records` verifies the first ten bundled records.
+- `cargo test --test kat` now runs all five KAT tests without ignored cases.
 
-This means the KAT coverage currently validates parsing, field extraction, and
-record-length consistency, but it should not be presented as completed
-reference-vector verification.
+This means the KAT coverage validates parsing, field extraction, record-length
+consistency, and successful verification against bundled reference vectors.

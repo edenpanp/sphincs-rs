@@ -12,10 +12,9 @@ The testing is split into three levels:
 
 **Integration tests** are in [`tests/integration.rs`](../tests/integration.rs). They check the public API from the outside: sign/verify, wrong-message rejection, raw-byte helpers, deterministic behaviour, cross-key rejection, cross-hasher rejection, empty and long messages, and tamper detection.
 
-**KAT tests** are in [`tests/kat.rs`](../tests/kat.rs). The parser and length
-checks run on their own. Two interoperability checks are present but currently
-ignored because the bundled reference vectors do not yet verify under the
-current SHA2 backend.
+**KAT tests** are in [`tests/kat.rs`](../tests/kat.rs). They cover parser and
+length checks plus reference-vector verification against the bundled
+SPHINCS+-SHA2-256s-simple signatures.
 
 ---
 
@@ -25,7 +24,7 @@ current SHA2 backend.
 cargo test                                              # everything
 cargo test --lib                                        # unit tests only
 cargo test --features test-utils --test integration    # integration suite
-cargo test --test kat                                   # parser tests run; interoperability checks are currently ignored
+cargo test --test kat                                   # KAT parser + bundled-vector verification
 ```
 
 If you only changed one area, these are the most relevant checks:
@@ -67,8 +66,8 @@ mkdir -p tests/kat
 cp tests/PQCsignKAT_128.rsp tests/kat/sphincs-sha2-256s-simple.rsp
 ```
 
-This fixes only the file layout. It does not change the current interoperability
-status of the ignored reference-signature checks.
+This is only a compatibility copy for older notes. The active KAT runner reads
+the bundled file directly from `tests/PQCsignKAT_128.rsp`.
 
 ---
 

@@ -82,17 +82,19 @@ The `test-utils` feature is mainly there to expose `RawSha256` and similar testi
 cargo test                                              # all tests
 cargo test --lib                                        # unit tests only (fast)
 cargo test --features test-utils --test integration    # integration suite
-cargo test --test kat                                   # parser tests run; interoperability checks are currently ignored
+cargo test --test kat                                   # parser + bundled KAT verification
 ```
 
-The KAT file ships at `tests/PQCsignKAT_128.rsp` but the runner expects it at `tests/kat/sphincs-sha2-256s-simple.rsp`. One-time setup:
+The KAT file ships at `tests/PQCsignKAT_128.rsp`. Older notes sometimes refer
+to `tests/kat/sphincs-sha2-256s-simple.rsp`; if you want that compatibility
+path too, create it once:
 
 ```bash
 mkdir -p tests/kat && cp tests/PQCsignKAT_128.rsp tests/kat/sphincs-sha2-256s-simple.rsp
 ```
 
-This is only a filename and location convenience. It does not make the ignored
-reference-vector verification checks pass.
+This is only a filename and location convenience. The active KAT tests already
+read the bundled file from its canonical location.
 
 If you want a single `cargo test` that runs everything once the KAT file has been copied into place:
 

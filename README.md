@@ -63,9 +63,8 @@ The repository currently contains:
 
 - 52 library tests discovered by `cargo test --features test-utils --lib`.
 - 8 integration tests in `tests/integration.rs`.
-- 5 KAT-related tests in `tests/kat.rs`; 3 parser/format checks run normally,
-  while 2 interoperability checks are currently ignored because the bundled
-  reference vectors do not yet verify under the current SHA2 backend.
+- 5 KAT-related tests in `tests/kat.rs`, covering parser/format checks and
+  bundled reference-vector verification.
 - 6 legacy helper tests in `src/group_impl_helpers.rs`; this file is not
   currently included by `src/lib.rs`, so those tests are not exercised by the
   normal Cargo commands.
@@ -90,9 +89,9 @@ cp tests/PQCsignKAT_128.rsp tests/kat/sphincs-sha2-256s-simple.rsp
 cargo test --test kat
 ```
 
-At present, the parser/length checks pass, but the reference-signature
-verification checks remain ignored and should not be claimed as complete
-interoperability validation.
+The current `Sha256Hasher` matches the bundled SPHINCS+-SHA2-256s-simple KAT
+vectors, so `cargo test --test kat` now runs both parser checks and
+reference-signature verification.
 
 ## Demo
 

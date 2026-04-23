@@ -35,8 +35,8 @@ Documentation files: 10 Markdown files under docs/
 is not currently included by `src/lib.rs`, so those tests are not exercised by
 the normal Cargo commands.
 
-The KAT suite currently consists of 3 passing parser/format checks and 2
-ignored interoperability checks.
+The KAT suite currently consists of 5 active passing tests, including bundled
+reference-signature verification.
 
 ## Read This First
 
@@ -62,8 +62,8 @@ cargo bench --features "test-utils parallel"
 cargo run --release --example demo
 ```
 
-The file-dependent KAT tests need the included `.rsp` file in the expected
-subdirectory:
+The bundled `.rsp` file is already read from `tests/PQCsignKAT_128.rsp`. If you
+also want the older compatibility path mentioned in some notes, create it once:
 
 ```sh
 mkdir -p tests/kat
