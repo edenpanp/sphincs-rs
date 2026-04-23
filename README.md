@@ -61,10 +61,11 @@ recorded benchmark data.
 
 The repository currently contains:
 
-- 54 library tests discovered by `cargo test --features test-utils --lib`.
-- 10 integration tests in `tests/integration.rs`.
-- 5 KAT-related tests in `tests/kat.rs`; the two file-dependent checks skip
-  automatically unless the NIST `.rsp` file is copied into the expected path.
+- 52 library tests discovered by `cargo test --features test-utils --lib`.
+- 8 integration tests in `tests/integration.rs`.
+- 5 KAT-related tests in `tests/kat.rs`; 3 parser/format checks run normally,
+  while 2 interoperability checks are currently ignored because the bundled
+  reference vectors do not yet verify under the current SHA2 backend.
 - 6 legacy helper tests in `src/group_impl_helpers.rs`; this file is not
   currently included by `src/lib.rs`, so those tests are not exercised by the
   normal Cargo commands.
@@ -80,14 +81,18 @@ cargo bench --features test-utils
 cargo bench --features "test-utils parallel"
 ```
 
-The NIST KAT file is stored at `tests/PQCsignKAT_128.rsp`. To run the
-file-dependent KAT checks:
+The bundled KAT file is stored at `tests/PQCsignKAT_128.rsp`. A compatibility
+copy can still be placed at the legacy path expected by older notes:
 
 ```sh
 mkdir -p tests/kat
 cp tests/PQCsignKAT_128.rsp tests/kat/sphincs-sha2-256s-simple.rsp
 cargo test --test kat
 ```
+
+At present, the parser/length checks pass, but the reference-signature
+verification checks remain ignored and should not be claimed as complete
+interoperability validation.
 
 ## Demo
 

@@ -219,7 +219,10 @@ fn run_group_demo(message: &[u8]) {
     );
     println!("Raw group signature length: {} bytes", raw.len());
     println!("Policy check with required role=4: {}", pass(allow_valid));
-    println!("Policy check after member revocation: {}", pass(!deny_valid));
+    println!(
+        "Policy check after member revocation: {}",
+        pass(!deny_valid)
+    );
 }
 
 fn print_parameters() {

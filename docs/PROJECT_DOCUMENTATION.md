@@ -73,7 +73,10 @@ The project currently includes unit tests, integration tests, and KAT tests. The
 
 **Integration tests** (`tests/integration.rs`) exercise the public API from the outside. They cover round-trips for both hashers, wrong-message rejection, serialisation checks, the raw-byte API, deterministic `R`, cross-key rejection, cross-hasher rejection, empty messages, long messages, and sampled bit-flip tampering.
 
-**KAT tests** (`tests/kat.rs`) use the NIST `.rsp` reference file included in the repo at `tests/PQCsignKAT_128.rsp`. The parser tests run without the file-dependent path, and the full file-based verification needs a one-time copy to `tests/kat/sphincs-sha2-256s-simple.rsp` first.
+**KAT tests** (`tests/kat.rs`) use the bundled `.rsp` file at
+`tests/PQCsignKAT_128.rsp`. The parser and format checks run normally. Two
+reference-signature interoperability checks are present but currently ignored,
+so the project should not claim completed KAT verification yet.
 
 More detail is in [TEST_RESULTS.md](./TEST_RESULTS.md).
 

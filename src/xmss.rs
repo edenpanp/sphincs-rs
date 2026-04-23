@@ -284,7 +284,7 @@ pub fn xmss_pk_from_sig<S: SphincsHasher>(
 mod tests {
     use super::*;
     use crate::hash::RawSha256;
-    use rand::{rngs::OsRng, RngCore};
+    use rand::{RngCore, rngs::OsRng};
 
     fn rng_n() -> [u8; N] {
         let mut b = [0u8; N];

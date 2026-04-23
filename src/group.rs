@@ -1,12 +1,12 @@
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
 
 use crate::adrs::{Adrs, AdrsType};
 use crate::hash::Sha256Hasher;
 use crate::params::{N, WOTS_LEN};
 use crate::sphincs::{
-    deserialise_sig, serialise_sig, slh_keygen_fast, slh_sign_fast, slh_verify, SphincsPK,
-    SphincsSK, SphincsSignature, SIG_BYTES,
+    SIG_BYTES, SphincsPK, SphincsSK, SphincsSignature, deserialise_sig, serialise_sig,
+    slh_keygen_fast, slh_sign_fast, slh_verify,
 };
 use crate::wots::{self, WotsSig};
 

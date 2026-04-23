@@ -48,7 +48,7 @@ If you are not sure where to start reading, `src/lib.rs` and then `src/sphincs.r
 | File | Purpose |
 |------|---------|
 | `tests/integration.rs` | 10 end-to-end tests against the public API (needs `--features test-utils`) |
-| `tests/kat.rs` | NIST KAT parser, decoder, and verification tests |
+| `tests/kat.rs` | KAT parser, decoder, and partial interoperability checks |
 | `tests/PQCsignKAT_128.rsp` | 100-record NIST reference file (SHA2-256s-simple) |
 
 The file-dependent KAT tests expect the `.rsp` file in a slightly different location. See [TEST_RESULTS.md](./TEST_RESULTS.md) for the one-time fix if you want to run those.

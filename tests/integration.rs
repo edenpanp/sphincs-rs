@@ -1,13 +1,13 @@
 use sphincs_rs::group::{
-    add_member, certify_new_keys_for_member, group_identify_member, group_keygen, group_sign,
-    group_verify, group_verify_raw, group_verify_with_policy, serialise_group_sig,
-    set_manager_epoch, set_member_role, CertificateValidationPolicy,
+    CertificateValidationPolicy, add_member, certify_new_keys_for_member, group_identify_member,
+    group_keygen, group_sign, group_verify, group_verify_raw, group_verify_with_policy,
+    serialise_group_sig, set_manager_epoch, set_member_role,
 };
 use sphincs_rs::hash::{RawSha256, Sha256Hasher};
 use sphincs_rs::params::N;
 use sphincs_rs::sphincs::{
-    deserialise_sig, serialise_sig, slh_keygen_fast, slh_sign_fast, slh_sign_raw_fast, slh_verify,
-    slh_verify_raw, SphincsPK, SIG_BYTES,
+    SIG_BYTES, SphincsPK, deserialise_sig, serialise_sig, slh_keygen_fast, slh_sign_fast,
+    slh_sign_raw_fast, slh_verify, slh_verify_raw,
 };
 
 macro_rules! test_with_hasher {

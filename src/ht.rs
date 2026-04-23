@@ -31,13 +31,9 @@ pub struct HtSig {
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 #[inline]
-fn leaf_index_for_layer(idx_leaf: u64, layer: usize) -> usize {
-    ((idx_leaf >> (layer * HP)) & ((1u64 << HP) - 1)) as usize
-}
-
-#[inline]
-fn tree_index_for_layer(idx_tree: u64, layer: usize) -> u64 {
-    idx_tree >> (layer * HP)
+fn next_leaf_and_tree(idx_tree: u64) -> (usize, u64) {
+    let mask = (1u64 << HP) - 1;
+    ((idx_tree & mask) as usize, idx_tree >> HP)
 }
 
 #[inline]
@@ -60,15 +56,18 @@ pub fn ht_sign<S: SphincsHasher>(
 ) -> HtSig {
     let mut sigs = Vec::with_capacity(D);
     let mut current_msg = *msg;
+    let mut current_tree = idx_tree;
+    let mut current_leaf = idx_leaf as usize;
 
     for j in 0..D {
-        let leaf_j = leaf_index_for_layer(idx_leaf, j);
-        let tree_j = tree_index_for_layer(idx_tree, j);
-        let adrs = make_layer_adrs(j, tree_j);
+        let adrs = make_layer_adrs(j, current_tree);
 
-        let sig_j = xmss::xmss_sign::<S>(&current_msg, sk_seed, leaf_j, pk_seed, adrs);
-        current_msg = xmss::xmss_pk_from_sig::<S>(leaf_j, &sig_j, &current_msg, pk_seed, adrs);
+        let sig_j = xmss::xmss_sign::<S>(&current_msg, sk_seed, current_leaf, pk_seed, adrs);
+        current_msg =
+            xmss::xmss_pk_from_sig::<S>(current_leaf, &sig_j, &current_msg, pk_seed, adrs);
         sigs.push(sig_j);
+
+        (current_leaf, current_tree) = next_leaf_and_tree(current_tree);
     }
     HtSig { xmss_sigs: sigs }
 }
@@ -87,16 +86,19 @@ pub fn ht_sign_fast<S: SphincsHasher>(
 ) -> HtSig {
     let mut sigs = Vec::with_capacity(D);
     let mut current_msg = *msg;
+    let mut current_tree = idx_tree;
+    let mut current_leaf = idx_leaf as usize;
 
     for j in 0..D {
-        let leaf_j = leaf_index_for_layer(idx_leaf, j);
-        let tree_j = tree_index_for_layer(idx_tree, j);
-        let adrs = make_layer_adrs(j, tree_j);
+        let adrs = make_layer_adrs(j, current_tree);
 
         // ← only this call differs from ht_sign
-        let sig_j = xmss::xmss_sign_fast::<S>(&current_msg, sk_seed, leaf_j, pk_seed, adrs);
-        current_msg = xmss::xmss_pk_from_sig::<S>(leaf_j, &sig_j, &current_msg, pk_seed, adrs);
+        let sig_j = xmss::xmss_sign_fast::<S>(&current_msg, sk_seed, current_leaf, pk_seed, adrs);
+        current_msg =
+            xmss::xmss_pk_from_sig::<S>(current_leaf, &sig_j, &current_msg, pk_seed, adrs);
         sigs.push(sig_j);
+
+        (current_leaf, current_tree) = next_leaf_and_tree(current_tree);
     }
     HtSig { xmss_sigs: sigs }
 }
@@ -112,12 +114,13 @@ pub fn ht_verify<S: SphincsHasher>(
 ) -> bool {
     debug_assert_eq!(sig.xmss_sigs.len(), D);
     let mut node = *msg;
+    let mut current_tree = idx_tree;
+    let mut current_leaf = idx_leaf as usize;
 
     for j in 0..D {
-        let leaf_j = leaf_index_for_layer(idx_leaf, j);
-        let tree_j = tree_index_for_layer(idx_tree, j);
-        let adrs = make_layer_adrs(j, tree_j);
-        node = xmss::xmss_pk_from_sig::<S>(leaf_j, &sig.xmss_sigs[j], &node, pk_seed, adrs);
+        let adrs = make_layer_adrs(j, current_tree);
+        node = xmss::xmss_pk_from_sig::<S>(current_leaf, &sig.xmss_sigs[j], &node, pk_seed, adrs);
+        (current_leaf, current_tree) = next_leaf_and_tree(current_tree);
     }
     node == *pk_root
 }
@@ -128,7 +131,7 @@ pub fn ht_verify<S: SphincsHasher>(
 mod tests {
     use super::*;
     use crate::hash::RawSha256;
-    use rand::{rngs::OsRng, RngCore};
+    use rand::{RngCore, rngs::OsRng};
 
     fn rng_n() -> [u8; N] {
         let mut b = [0u8; N];
@@ -181,5 +184,17 @@ mod tests {
         let root = ht_pk::<RawSha256>(&sk, &pk);
         let sig = ht_sign_fast::<RawSha256>(&msg, &sk, &pk, 0, 0);
         assert!(!ht_verify::<RawSha256>(&wrong, &sig, &pk, 0, 0, &root));
+    }
+
+    #[test]
+    fn ht_nonzero_tree_and_leaf_roundtrip() {
+        let (sk, pk, msg) = (rng_n(), rng_n(), rng_n());
+        let root = ht_pk::<RawSha256>(&sk, &pk);
+        let idx_tree = 0x0123_4567_89ab_cdu64 & ((1u64 << (D * HP - HP)) - 1);
+        let idx_leaf = 0x5au64;
+        let sig = ht_sign_fast::<RawSha256>(&msg, &sk, &pk, idx_tree, idx_leaf);
+        assert!(ht_verify::<RawSha256>(
+            &msg, &sig, &pk, idx_tree, idx_leaf, &root
+        ));
     }
 }

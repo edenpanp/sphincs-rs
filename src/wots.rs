@@ -33,13 +33,25 @@ pub type WotsSig = [[u8; N]; WOTS_LEN];
 /// 2. Compute `checksum = Σ (W−1 − dᵢ)`.
 /// 3. Encode the checksum as `WOTS_LEN2` base-W digits (big-endian, right-aligned).
 /// 4. Return `[msg_digits ‖ checksum_digits]` of length `WOTS_LEN`.
+fn base_w(bytes: &[u8], out_len: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(out_len);
+    for &byte in bytes {
+        if out.len() == out_len {
+            break;
+        }
+        out.push((byte >> 4) & 0x0F);
+        if out.len() == out_len {
+            break;
+        }
+        out.push(byte & 0x0F);
+    }
+    out
+}
+
 fn base_w_and_checksum(msg: &[u8; N]) -> [u8; WOTS_LEN] {
     // Step 1: expand N bytes → WOTS_LEN1 nibbles (base-16 digits)
     let mut digits = [0u8; WOTS_LEN];
-    for (i, &byte) in msg.iter().enumerate() {
-        digits[2 * i] = (byte >> 4) & 0x0F;
-        digits[2 * i + 1] = byte & 0x0F;
-    }
+    digits[..WOTS_LEN1].copy_from_slice(&base_w(msg, WOTS_LEN1));
     // Sanity: N * 2 must equal WOTS_LEN1 (32 * 2 = 64 ✓)
     debug_assert_eq!(N * 2, WOTS_LEN1);
 
@@ -49,19 +61,13 @@ fn base_w_and_checksum(msg: &[u8; N]) -> [u8; WOTS_LEN] {
         .map(|&d| (W as u32 - 1) - d as u32)
         .sum();
 
-    // Step 3: encode checksum into WOTS_LEN2 nibbles (right-aligned in 4-byte word)
-    let checksum_bytes = checksum.to_be_bytes(); // 4 bytes
-    let all_nibbles: [u8; 8] = {
-        let mut n = [0u8; 8];
-        for (i, &b) in checksum_bytes.iter().enumerate() {
-            n[2 * i] = (b >> 4) & 0x0F;
-            n[2 * i + 1] = b & 0x0F;
-        }
-        n
-    };
-    // Take the last WOTS_LEN2 nibbles (least-significant)
-    let cs_start = 8 - WOTS_LEN2;
-    digits[WOTS_LEN1..WOTS_LEN].copy_from_slice(&all_nibbles[cs_start..]);
+    // Step 3: FIPS 205 aligns the checksum bits to the next byte boundary
+    // before converting with `base_2b`.
+    let checksum_shifted = checksum << ((8 - ((WOTS_LEN2 * 4) % 8)) % 8);
+    let checksum_bytes = checksum_shifted.to_be_bytes();
+    let checksum_start = checksum_bytes.len() - ((WOTS_LEN2 * 4).div_ceil(8));
+    let checksum_digits = base_w(&checksum_bytes[checksum_start..], WOTS_LEN2);
+    digits[WOTS_LEN1..WOTS_LEN].copy_from_slice(&checksum_digits);
 
     digits
 }
@@ -211,7 +217,7 @@ pub fn wots_pk_from_sig<S: SphincsHasher>(
 mod tests {
     use super::*;
     use crate::hash::RawSha256;
-    use rand::{rngs::OsRng, RngCore};
+    use rand::{RngCore, rngs::OsRng};
 
     /// End-to-end WOTS+ round-trip: sign then verify.
     #[test]

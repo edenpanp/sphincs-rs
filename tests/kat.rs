@@ -163,17 +163,20 @@ fn kat_file_parses_and_lengths_match() {
     let record = &records[0];
     assert_eq!(record.msg.len(), record.mlen);
     assert_eq!(record.msg_from_sm(), record.msg.as_slice());
-    assert_eq!(record.signature_bytes().len() + record.msg_from_sm().len(), record.smlen);
+    assert_eq!(
+        record.signature_bytes().len() + record.msg_from_sm().len(),
+        record.smlen
+    );
     assert_eq!(record.pk.len(), 64);
     assert_eq!(record.sk.len(), 128);
 }
 
 #[test]
-#[ignore = "Known mismatch with the official KAT vectors in the current implementation"]
+#[ignore = "Bundled reference vectors do not yet verify under the current SHA2 backend"]
 fn kat_verify_sample_records() {
     let records = load_kat();
 
-    for record in records.iter().take(2) {
+    for record in records.iter().take(3) {
         let (pk_seed, pk_root) = record.decode_pk();
         let pk = SphincsPK { pk_seed, pk_root };
         assert!(

@@ -27,11 +27,6 @@
 //! | Alg. 16   | `fors_sign`       | [`fors_sign`]          |
 //! | Alg. 17   | `fors_PKFromSig`  | [`fors_pk_from_sig`]   |
 //!
-//! # TODO: KAT compliance
-//!
-//! Verify auth-path index computation `(j·T + (idx_j >> l)) ^ 1` against NIST
-//! FIPS 205 KAT vectors. The signing/verification are mutually consistent here.
-
 use crate::adrs::{Adrs, AdrsType};
 use crate::hash::SphincsHasher;
 use crate::params::{A, K, MD_BYTES, N, T};
@@ -62,7 +57,8 @@ pub struct ForsSig {
 /// Decode the FORS portion of the message digest into K leaf indices.
 ///
 /// The `MD_BYTES = ⌈K·A/8⌉` bytes are split into K consecutive A-bit
-/// integers (big-endian bit order). Each index selects one leaf in the
+/// integers in FIPS 205 `base_2b` order, i.e. bytes are consumed in
+/// big-endian bit order. Each index selects one leaf in the
 /// corresponding tree, i.e. each is in [0, T = 2^A).
 ///
 /// # Example (K=2, A=3)
@@ -74,13 +70,13 @@ pub struct ForsSig {
 /// ```
 fn decode_indices(md: &[u8; MD_BYTES]) -> [usize; K] {
     let mut indices = [0usize; K];
-    let mut bit_ptr = 0usize; // current bit position in `md` (MSB-first)
+    let mut bit_ptr = 0usize;
 
     for idx in indices.iter_mut() {
         let mut val = 0usize;
         for _ in 0..A {
             let byte_pos = bit_ptr / 8;
-            let bit_pos = 7 - (bit_ptr % 8); // MSB-first within each byte
+            let bit_pos = 7 - (bit_ptr % 8);
             val = (val << 1) | (((md[byte_pos] >> bit_pos) & 1) as usize);
             bit_ptr += 1;
         }
@@ -269,7 +265,7 @@ pub fn fors_pk_from_sig<S: SphincsHasher>(
 mod tests {
     use super::*;
     use crate::hash::RawSha256;
-    use rand::{rngs::OsRng, RngCore};
+    use rand::{RngCore, rngs::OsRng};
 
     fn random_n() -> [u8; N] {
         let mut b = [0u8; N];

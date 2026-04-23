@@ -334,18 +334,16 @@ criterion_main!(benches);
 
 fn bench_group(c: &mut Criterion) {
     use sphincs_rs::group::{
-        CertificateValidationPolicy, add_member, certify_new_keys_for_member, group_identify_member,
-        group_keygen, group_sign, group_verify, group_verify_with_policy, set_manager_epoch,
-        set_member_role,
+        CertificateValidationPolicy, add_member, certify_new_keys_for_member,
+        group_identify_member, group_keygen, group_sign, group_verify, group_verify_with_policy,
+        set_manager_epoch, set_member_role,
     };
 
     let mut g = c.benchmark_group("group");
     g.sample_size(10);
 
     // group_keygen: manager SPHINCS+ key generation for the certificate authority.
-    g.bench_function("keygen/RawSha256", |b| {
-        b.iter(group_keygen)
-    });
+    g.bench_function("keygen/RawSha256", |b| b.iter(group_keygen));
 
     // Provision one member with one certified WOTS+ key.
     g.bench_function("provision_member", |b| {

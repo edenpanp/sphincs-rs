@@ -24,16 +24,16 @@ cargo test --test kat
 | Command | Result |
 |---------|--------|
 | `cargo check --features test-utils` | PASS in the recorded lightweight check |
-| `cargo test --features test-utils --lib` | 54 library tests discovered; PASS in the recorded clean run |
+| `cargo test --features test-utils --lib` | 52 library tests discovered; PASS in the current clean run |
 | `cargo test` | PASS in the recorded clean run |
-| `cargo test --features test-utils --test integration` | PASS — 10/10 |
-| `cargo test --test kat` | PASS — parser tests always run; file-based tests run if the KAT file is in place |
+| `cargo test --features test-utils --test integration` | PASS — 8/8 |
+| `cargo test --test kat` | PASS — 3 parser/format checks pass; 2 interoperability checks are ignored |
 
 The repository currently contains 75 `#[test]` markers across `src/` and
-`tests/`. Of these, 69 are exercised by the normal Cargo commands listed above:
-54 library tests, 10 integration tests, and 5 KAT-related tests. The remaining
+`tests/`. Of these, 63 are exercised by the normal Cargo commands listed above:
+52 library tests, 8 integration tests, and 3 currently active KAT tests. The remaining
 6 are in `src/group_impl_helpers.rs`, which is not currently included by
-`src/lib.rs`.
+`src/lib.rs`, and 2 KAT interoperability checks are present but ignored.
 
 ---
 
@@ -56,15 +56,14 @@ The XMSS equivalence check is probably the most important test in the suite. If 
 
 ## Integration tests
 
-All 10 integration tests passed in the recorded clean run. [`tests/integration.rs`](../tests/integration.rs) uses the public API rather than internal helpers, so this is probably the closest thing to "how a normal user would hit the library".
+All 8 integration tests passed in the current clean run. [`tests/integration.rs`](../tests/integration.rs) uses the public API rather than internal helpers, so this is probably the closest thing to "how a normal user would hit the library".
 
 | Test | What it checks | Result |
 |------|----------------|--------|
 | `integration_raw_sha256` | sign/verify, wrong-msg rejection, serialise/deserialise, raw API, deterministic R, cross-key rejection — all with `RawSha256` | PASS |
 | `integration_sha256_hasher` | same six checks with `Sha256Hasher` | PASS |
 | `integration_cross_hasher_rejects` | `RawSha256` sig must not verify under `Sha256Hasher` with the same pk material | PASS |
-| `integration_empty_message` | sign and verify `b""` | PASS |
-| `integration_long_message` | sign and verify a 65 536-byte input | PASS |
+| `integration_empty_and_long_messages` | sign and verify `b""` and a 65 536-byte input | PASS |
 | `integration_bit_flip_rejection` | single-bit flips at 8 positions across the signature all cause verification failure | PASS |
 | `integration_multiple_keypairs` | 3 keypairs; each sig validates under its own key and fails under the other two | PASS |
 | `sig_bytes_constant_correct` | `SIG_BYTES` == `N + K*(1+A)*N + D*(WOTS_LEN+HP)*N` == 29 792 | PASS |
@@ -84,7 +83,10 @@ The separate baseline-vs-alpha integration and timing comparison is documented i
 
 ## KAT / real data
 
-A NIST `.rsp` file is included in the repo at `tests/PQCsignKAT_128.rsp`. It contains 100 records produced by the SPHINCS+-SHA2-256s-simple reference implementation, so it is useful because it gives us something external to check against instead of only checking against our own output.
+A bundled `.rsp` file is included in the repo at `tests/PQCsignKAT_128.rsp`. It
+contains 100 records in the standard NIST PQC response-file format, so it is
+still useful as external-format input even though full interoperability with
+those reference signatures is not yet claimed by this repository.
 
 Each record has the standard NIST PQC format:
 - `count` — record index (0 through 99)
@@ -102,18 +104,21 @@ The parser tests in `tests/kat.rs` do not depend on the file being in that exact
 |------|--------|
 | `parse_rsp_basic` | PASS |
 | `decode_sk_fields` | PASS |
-| `sm_split_correct` | PASS |
+| `kat_file_parses_and_lengths_match` | PASS |
 
-The file-dependent tests run once the test runner can find the file at `tests/kat/sphincs-sha2-256s-simple.rsp`, while the repository currently stores it at `tests/PQCsignKAT_128.rsp`. The one-time fix is:
+If you want the legacy path mentioned by older notes, you can still copy the
+file to `tests/kat/sphincs-sha2-256s-simple.rsp`:
 
 ```bash
 mkdir -p tests/kat
 cp tests/PQCsignKAT_128.rsp tests/kat/sphincs-sha2-256s-simple.rsp
 ```
 
-After that:
+However, the current status is:
 
-- `kat_verify_all_signatures` checks that all 100 reference signatures verify correctly
-- `kat_sign_matches_reference` checks whether signing reproduces the reference bytes exactly
+- `kat_verify_sample_records` exists but is ignored because the bundled reference signatures do not yet verify under the current SHA2 backend.
+- `kat_verify_first_ten_records` is also ignored; it is both long-running and blocked on the same interoperability mismatch.
 
-So this is mostly a file-placement issue, not some deeper parser problem.
+This means the KAT coverage currently validates parsing, field extraction, and
+record-length consistency, but it should not be presented as completed
+reference-vector verification.

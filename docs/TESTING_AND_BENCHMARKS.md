@@ -12,7 +12,10 @@ The testing is split into three levels:
 
 **Integration tests** are in [`tests/integration.rs`](../tests/integration.rs). They check the public API from the outside: sign/verify, wrong-message rejection, raw-byte helpers, deterministic behaviour, cross-key rejection, cross-hasher rejection, empty and long messages, and tamper detection.
 
-**KAT tests** are in [`tests/kat.rs`](../tests/kat.rs). The parser tests run on their own, while the file-based checks run once the NIST `.rsp` file has been copied into the expected path.
+**KAT tests** are in [`tests/kat.rs`](../tests/kat.rs). The parser and length
+checks run on their own. Two interoperability checks are present but currently
+ignored because the bundled reference vectors do not yet verify under the
+current SHA2 backend.
 
 ---
 
@@ -22,7 +25,7 @@ The testing is split into three levels:
 cargo test                                              # everything
 cargo test --lib                                        # unit tests only
 cargo test --features test-utils --test integration    # integration suite
-cargo test --test kat                                   # parser tests always run; file-based KAT tests run if the file is in place
+cargo test --test kat                                   # parser tests run; interoperability checks are currently ignored
 ```
 
 If you only changed one area, these are the most relevant checks:
@@ -53,16 +56,19 @@ For the separate baseline-vs-alpha experiment, see [ALPHA_COMPARISON_REPORT.md](
 
 ---
 
-## KAT path fix
+## KAT file layout
 
-The NIST test vectors ship as `tests/PQCsignKAT_128.rsp` (100 records, SPHINCS+-SHA2-256s-simple). The test runner looks for them at `tests/kat/sphincs-sha2-256s-simple.rsp`. Fix once with:
+The bundled test vectors ship as `tests/PQCsignKAT_128.rsp`. Older notes refer
+to the legacy path `tests/kat/sphincs-sha2-256s-simple.rsp`; if you want that
+path present too, copy the file once:
 
 ```bash
 mkdir -p tests/kat
 cp tests/PQCsignKAT_128.rsp tests/kat/sphincs-sha2-256s-simple.rsp
 ```
 
-After that, the KAT verification and re-signing checks can run normally.
+This fixes only the file layout. It does not change the current interoperability
+status of the ignored reference-signature checks.
 
 ---
 

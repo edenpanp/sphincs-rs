@@ -23,8 +23,8 @@ Current scope:
 ```text
 Source files:        12 Rust files under src/
 Exported modules:    11 modules from src/lib.rs
-Library tests:       54 discovered by cargo test --features test-utils --lib
-Integration tests:   10 in tests/integration.rs
+Library tests:       52 discovered by cargo test --features test-utils --lib
+Integration tests:   8 in tests/integration.rs
 KAT tests:           5 in tests/kat.rs
 Benchmark file:      benches/sphincs_bench.rs
 Demo entry point:    demo/main.rs
@@ -34,6 +34,9 @@ Documentation files: 10 Markdown files under docs/
 `src/group_impl_helpers.rs` also contains 6 legacy helper tests, but that file
 is not currently included by `src/lib.rs`, so those tests are not exercised by
 the normal Cargo commands.
+
+The KAT suite currently consists of 3 passing parser/format checks and 2
+ignored interoperability checks.
 
 ## Read This First
 
