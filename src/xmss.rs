@@ -295,7 +295,7 @@ mod tests {
     /// Baseline and fast strategies must produce the same root.
     #[test]
     fn xmss_fast_root_matches_baseline() {
-        let (sk, pk, msg) = (rng_n(), rng_n(), rng_n());
+        let (sk, pk) = (rng_n(), rng_n());
         let adrs = Adrs::new(AdrsType::TreeNode);
 
         let root_baseline = xmss_node::<RawSha256>(&sk, 0, HP, &pk, adrs);
