@@ -22,7 +22,8 @@ fn split_digest_extracts_expected_sections() {
 
     let mut leaf_bytes = [0u8; 8];
     let leaf_start = MD_BYTES + IDX_TREE_BYTES;
-    leaf_bytes[8 - IDX_LEAF_BYTES..].copy_from_slice(&digest[leaf_start..leaf_start + IDX_LEAF_BYTES]);
+    leaf_bytes[8 - IDX_LEAF_BYTES..]
+        .copy_from_slice(&digest[leaf_start..leaf_start + IDX_LEAF_BYTES]);
     assert_eq!(idx_leaf, u64::from_be_bytes(leaf_bytes));
 }
 

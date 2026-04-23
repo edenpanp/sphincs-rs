@@ -13,7 +13,7 @@ use crate::params::{IDX_LEAF_BYTES, IDX_TREE_BYTES, M, MD_BYTES};
 pub fn split_digest(digest: &[u8; M]) -> ([u8; MD_BYTES], u64, u64) {
     // ---- md ----
     let mut md = [0u8; MD_BYTES];
-    md.copy_from_slice(&digest[..MD_BYTES]); 
+    md.copy_from_slice(&digest[..MD_BYTES]);
     // should be safe since size is fixed
 
     // ---- tree idx ----

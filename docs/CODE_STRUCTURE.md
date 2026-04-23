@@ -36,8 +36,8 @@ This is the core implementation. In rough dependency order:
 | `src/ht.rs` | Hypertree — baseline and fast signing, shared verification |
 | `src/sphincs.rs` | Top-level SLH-DSA API — keygen, sign, verify, serialise |
 | `src/lib.rs` | Crate root — re-exports, module structure, usage examples |
-| `src/group.rs` | Experimental group-signature extension (not core, merge conflicts) |
-| `src/group_impl_helpers.rs` | Supporting code for group.rs |
+| `src/group.rs` | Experimental group-signature extension (not the core SPHINCS+ implementation) |
+| `src/group_impl_helpers.rs` | Legacy supporting code for the group experiment; not currently included by `src/lib.rs` |
 
 If you are not sure where to start reading, `src/lib.rs` and then `src/sphincs.rs` are probably the easiest entry points. `src/xmss.rs` is the important one if you care about the optimisation work.
 
@@ -71,12 +71,10 @@ There is currently one benchmark file: `benches/sphincs_bench.rs`. It contains t
 | `API_REFERENCE.md` | Function-level quick reference |
 | `ARCHITECTURE.md` | Layered design and data flow |
 | `CODE_STRUCTURE.md` | This file |
-| `DEVELOPMENT_TIMELINE.md` | How the project was built in stages |
 | `TESTING_AND_BENCHMARKS.md` | How to run tests and benchmarks |
-| `TEST_PLAN_AND_BENCHMARK_PLAYBOOK.md` | Planned test/benchmark workflow |
 | `TEST_RESULTS.md` | Actual test outcomes |
 | `BENCHMARK_RESULTS.md` | Measured performance numbers |
-| `RESULTS_AND_EVALUATION.md` | Summary of results and limitations |
+| `ALPHA_COMPARISON_REPORT.md` | Parameter comparison and alpha-style experiment notes |
 
 ---
 

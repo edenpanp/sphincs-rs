@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+test-utils = []
 parallel = ["dep:rayon"]
 
 [dependencies]
@@ -20,3 +21,8 @@ rand = "0.8"
 [[bench]]
 name = "sphincs_bench"
 harness = false
+required-features = ["test-utils"]
+
+[[example]]
+name = "demo"
+path = "demo/main.rs"

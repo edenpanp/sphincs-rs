@@ -566,7 +566,7 @@ mod tests {
     fn wots_roundtrip_with_sha256_hasher() {
         use crate::adrs::AdrsType;
         use crate::wots::{wots_pk_from_sig, wots_pk_gen, wots_sign};
-        use rand::{RngCore, rngs::OsRng};
+        use rand::{rngs::OsRng, RngCore};
 
         let mut sk_seed = [0u8; N];
         let mut pk_seed = [0u8; N];

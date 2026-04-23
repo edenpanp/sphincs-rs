@@ -1,4 +1,3 @@
-
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 
@@ -66,15 +65,13 @@ pub struct CertificateValidationPolicy {
 impl CertificateValidationPolicy {
     /// Build a default policy for a given current epoch.
     pub fn new(current_epoch: u64) -> Self {
-        let policy = CertificateValidationPolicy {
-            current_epoch: current_epoch,
+        CertificateValidationPolicy {
+            current_epoch,
             check_role: false,
             required_role: 0,
             revoked_certificate_ids: Vec::new(),
             revoked_members: Vec::new(),
-        };
-
-        policy
+        }
     }
 }
 
@@ -102,16 +99,7 @@ pub struct GroupSignature {
     pub wots_signature: WotsSig,
 }
 
-pub const GROUP_SIG_BYTES: usize = 8
-    + 4
-    + 4
-    + 8
-    + 8
-    + 1
-    + N
-    + N
-    + SIG_BYTES
-    + WOTS_LEN * N;
+pub const GROUP_SIG_BYTES: usize = 8 + 4 + 4 + 8 + 8 + 1 + N + N + SIG_BYTES + WOTS_LEN * N;
 
 /// Public verification key for the group system.
 #[derive(Clone, Debug)]
@@ -152,7 +140,7 @@ fn hash32(parts: &[&[u8]]) -> [u8; N] {
 
     let digest = h.finalize();
     let mut out = [0u8; N];
-    out.copy_from_slice(&digest[0..N]);
+    out.copy_from_slice(&digest[..N]);
     out
 }
 
@@ -228,9 +216,7 @@ fn revoked_member_list_contains(list: &[u32], member_id: u32) -> bool {
 
 /// Hash an arbitrary message down to the fixed N-byte input expected here.
 fn hash_message_for_wots(msg: &[u8]) -> [u8; N] {
-    let parts = [msg];
-    let digest = hash32(&parts);
-    digest
+    hash32(&[msg])
 }
 
 /// Build the ADRS used for one member's one-time WOTS key.
@@ -249,48 +235,40 @@ fn member_wots_adrs(member_id: u32, key_id: u32) -> Adrs {
 }
 
 /// Derive one WOTS+ key pair from the member seed and indices.
-fn derive_wots_key_pair(
-    member_seed: &[u8; N],
-    member_id: u32,
-    key_id: u32,
-) -> OneTimeKeyPair {
+fn derive_wots_key_pair(member_seed: &[u8; N], member_id: u32, key_id: u32) -> OneTimeKeyPair {
     let member_id_bytes = member_id.to_be_bytes();
     let key_id_bytes = key_id.to_be_bytes();
 
-    let sk_parts = [
+    let sk_seed = hash32(&[
         &member_seed[..],
         &b"member-wots-sk"[..],
         &member_id_bytes[..],
         &key_id_bytes[..],
-    ];
-    let sk_seed = hash32(&sk_parts);
+    ]);
 
-    let pk_parts = [
+    let pk_seed = hash32(&[
         &member_seed[..],
         &b"member-wots-pk"[..],
         &member_id_bytes[..],
         &key_id_bytes[..],
-    ];
-    let pk_seed = hash32(&pk_parts);
+    ]);
 
     let adrs = member_wots_adrs(member_id, key_id);
     let wots_pk = wots::wots_pk_gen::<Sha256Hasher>(&sk_seed, &pk_seed, &adrs);
 
     let public_key = OneTimePublicKey {
-        member_id: member_id,
-        key_id: key_id,
-        pk_seed: pk_seed,
-        wots_pk: wots_pk,
+        member_id,
+        key_id,
+        pk_seed,
+        wots_pk,
     };
 
-    let key_pair = OneTimeKeyPair {
-        key_id: key_id,
-        sk_seed: sk_seed,
-        pk_seed: pk_seed,
-        public_key: public_key,
-    };
-
-    key_pair
+    OneTimeKeyPair {
+        key_id,
+        sk_seed,
+        pk_seed,
+        public_key,
+    }
 }
 
 /// Serialise the exact certificate body that the manager signs.
@@ -327,13 +305,11 @@ fn make_certificate(
     manager.next_certificate_id += 1;
 
     let issued_epoch = manager.current_epoch;
-    let expiry_epoch;
-
-    if u64::MAX - issued_epoch < manager.default_validity_epochs {
-        expiry_epoch = u64::MAX;
+    let expiry_epoch = if u64::MAX - issued_epoch < manager.default_validity_epochs {
+        u64::MAX
     } else {
-        expiry_epoch = issued_epoch + manager.default_validity_epochs;
-    }
+        issued_epoch + manager.default_validity_epochs
+    };
 
     let role = get_member_role(manager, public_key.member_id);
 
@@ -354,27 +330,21 @@ fn make_certificate(
         .issued_certificates
         .push((certificate_id, public_key.member_id));
 
-    let certificate = MemberCertificate {
-        certificate_id: certificate_id,
+    MemberCertificate {
+        certificate_id,
         member_id: public_key.member_id,
         key_id: public_key.key_id,
-        issued_epoch: issued_epoch,
-        expiry_epoch: expiry_epoch,
-        role: role,
+        issued_epoch,
+        expiry_epoch,
+        role,
         pk_seed: public_key.pk_seed,
         wots_pk: public_key.wots_pk,
-        manager_signature: manager_signature,
-    };
-
-    certificate
+        manager_signature,
+    }
 }
 
 /// Append `count` new certified WOTS+ keys to one member.
-fn append_new_certified_keys(
-    manager: &mut GroupManagerKey,
-    member: &mut MemberSK,
-    count: usize,
-) {
+fn append_new_certified_keys(manager: &mut GroupManagerKey, member: &mut MemberSK, count: usize) {
     let start = member.next_key_id;
     let mut offset = 0u32;
 
@@ -383,13 +353,11 @@ fn append_new_certified_keys(
         let key_pair = derive_wots_key_pair(&member.member_seed, member.member_id, key_id);
         let certificate = make_certificate(manager, &key_pair.public_key);
 
-        let certified_key = CertifiedKey {
-            key_pair: key_pair,
-            certificate: certificate,
+        member.certified_keys.push(CertifiedKey {
+            key_pair,
+            certificate,
             used: false,
-        };
-
-        member.certified_keys.push(certified_key);
+        });
         offset += 1;
     }
 
@@ -401,7 +369,7 @@ pub fn group_keygen() -> (GroupManagerKey, GroupPK) {
     let (signing_sk, signing_pk) = slh_keygen_fast::<Sha256Hasher>();
 
     let manager = GroupManagerKey {
-        signing_sk: signing_sk,
+        signing_sk,
         signing_pk: signing_pk.clone(),
         max_members: 1u32 << crate::params::HP,
         next_member_id: 0,
@@ -439,8 +407,8 @@ pub fn add_member(
     manager.member_roles.push((member_id, 1));
 
     let mut member = MemberSK {
-        member_id: member_id,
-        member_seed: member_seed,
+        member_id,
+        member_seed,
         certified_keys: Vec::new(),
         next_key_id: 0,
     };
@@ -456,18 +424,15 @@ pub fn derive_member_key(
     member_id: u32,
     initial_keys: usize,
 ) -> Result<MemberSK, GroupError> {
-    let maybe_pos = find_member_seed_pos(manager, member_id);
-
-    if maybe_pos.is_none() {
+    let Some(pos) = find_member_seed_pos(manager, member_id) else {
         return Err(GroupError::UnknownMember);
-    }
+    };
 
-    let pos = maybe_pos.unwrap();
     let member_seed = manager.member_seeds[pos].1;
 
     let mut member = MemberSK {
-        member_id: member_id,
-        member_seed: member_seed,
+        member_id,
+        member_seed,
         certified_keys: Vec::new(),
         next_key_id: 0,
     };
@@ -483,9 +448,7 @@ pub fn certify_new_keys_for_member(
     member: &mut MemberSK,
     count: usize,
 ) -> Result<(), GroupError> {
-    let maybe_pos = find_member_seed_pos(manager, member.member_id);
-
-    if maybe_pos.is_none() {
+    if find_member_seed_pos(manager, member.member_id).is_none() {
         return Err(GroupError::UnknownMember);
     }
 
@@ -500,10 +463,7 @@ pub fn set_manager_epoch(manager: &mut GroupManagerKey, epoch: u64) {
 }
 
 /// Set the default certificate lifetime.
-pub fn set_default_certificate_validity(
-    manager: &mut GroupManagerKey,
-    validity_epochs: u64,
-) {
+pub fn set_default_certificate_validity(manager: &mut GroupManagerKey, validity_epochs: u64) {
     manager.default_validity_epochs = validity_epochs;
 }
 
@@ -513,28 +473,20 @@ pub fn set_member_role(
     member_id: u32,
     role: u8,
 ) -> Result<(), GroupError> {
-    let maybe_pos = find_member_seed_pos(manager, member_id);
-
-    if maybe_pos.is_none() {
+    if find_member_seed_pos(manager, member_id).is_none() {
         return Err(GroupError::UnknownMember);
     }
 
-    let mut found = false;
     let mut i = 0usize;
-
     while i < manager.member_roles.len() {
         if manager.member_roles[i].0 == member_id {
             manager.member_roles[i].1 = role;
-            found = true;
-            break;
+            return Ok(());
         }
         i += 1;
     }
 
-    if !found {
-        manager.member_roles.push((member_id, role));
-    }
-
+    manager.member_roles.push((member_id, role));
     Ok(())
 }
 
@@ -571,13 +523,11 @@ pub fn verify_manager_certificate_signature(
         &certificate.wots_pk,
     );
 
-    let ok = slh_verify::<Sha256Hasher>(
+    slh_verify::<Sha256Hasher>(
         &cert_body,
         &certificate.manager_signature,
         gpk.as_sphincs_pk(),
-    );
-
-    ok
+    )
 }
 
 /// Check whether the certificate matches the expected member/key binding.
@@ -586,15 +536,7 @@ pub fn verify_certificate_binding(
     expected_member_id: u32,
     expected_key_id: u32,
 ) -> bool {
-    if certificate.member_id != expected_member_id {
-        return false;
-    }
-
-    if certificate.key_id != expected_key_id {
-        return false;
-    }
-
-    true
+    certificate.member_id == expected_member_id && certificate.key_id == expected_key_id
 }
 
 /// Check certificate metadata against a verification policy.
@@ -614,10 +556,8 @@ pub fn verify_certificate_metadata(
         return false;
     }
 
-    if policy.check_role {
-        if certificate.role != policy.required_role {
-            return false;
-        }
+    if policy.check_role && certificate.role != policy.required_role {
+        return false;
     }
 
     if revoked_certificate_list_contains(
@@ -640,19 +580,8 @@ pub fn verify_certificate(
     gpk: &GroupPK,
     policy: &CertificateValidationPolicy,
 ) -> bool {
-    let sig_ok = verify_manager_certificate_signature(certificate, gpk);
-
-    if !sig_ok {
-        return false;
-    }
-
-    let meta_ok = verify_certificate_metadata(certificate, policy);
-
-    if !meta_ok {
-        return false;
-    }
-
-    true
+    verify_manager_certificate_signature(certificate, gpk)
+        && verify_certificate_metadata(certificate, policy)
 }
 
 /// Sign with a specific certified key index.
@@ -666,7 +595,6 @@ pub fn group_sign_with_key_index(
     }
 
     let certified_key = &mut member.certified_keys[key_index];
-
     if certified_key.used {
         return Err(GroupError::NoUnusedCertifiedKey);
     }
@@ -683,48 +611,30 @@ pub fn group_sign_with_key_index(
 
     certified_key.used = true;
 
-    let group_signature = GroupSignature {
+    Ok(GroupSignature {
         certificate: certified_key.certificate.clone(),
-        wots_signature: wots_signature,
-    };
-
-    Ok(group_signature)
+        wots_signature,
+    })
 }
 
 /// Sign with the first unused certified key.
-pub fn group_sign(
-    msg: &[u8],
-    member: &mut MemberSK,
-) -> Result<GroupSignature, GroupError> {
-    let mut found = false;
-    let mut key_index = 0usize;
+pub fn group_sign(msg: &[u8], member: &mut MemberSK) -> Result<GroupSignature, GroupError> {
     let mut i = 0usize;
 
     while i < member.certified_keys.len() {
         if !member.certified_keys[i].used {
-            found = true;
-            key_index = i;
-            break;
+            return group_sign_with_key_index(msg, member, i);
         }
         i += 1;
     }
 
-    if !found {
-        return Err(GroupError::NoUnusedCertifiedKey);
-    }
-
-    group_sign_with_key_index(msg, member, key_index)
+    Err(GroupError::NoUnusedCertifiedKey)
 }
 
 /// Verify using a very small default policy.
-pub fn group_verify(
-    msg: &[u8],
-    signature: &GroupSignature,
-    gpk: &GroupPK,
-) -> bool {
+pub fn group_verify(msg: &[u8], signature: &GroupSignature, gpk: &GroupPK) -> bool {
     let policy = CertificateValidationPolicy::new(signature.certificate.issued_epoch);
-    let ok = group_verify_with_policy(msg, signature, gpk, &policy);
-    ok
+    group_verify_with_policy(msg, signature, gpk, &policy)
 }
 
 /// Verify the full group signature under a given policy.
@@ -734,9 +644,7 @@ pub fn group_verify_with_policy(
     gpk: &GroupPK,
     policy: &CertificateValidationPolicy,
 ) -> bool {
-    let cert_ok = verify_certificate(&signature.certificate, gpk, policy);
-
-    if !cert_ok {
+    if !verify_certificate(&signature.certificate, gpk, policy) {
         return false;
     }
 
@@ -752,11 +660,7 @@ pub fn group_verify_with_policy(
         &adrs,
     );
 
-    if pk_from_sig != signature.certificate.wots_pk {
-        return false;
-    }
-
-    true
+    pk_from_sig == signature.certificate.wots_pk
 }
 
 /// Manager-side signer identification.
@@ -769,23 +673,11 @@ pub fn group_identify_member(
         manager_pk: manager.signing_pk.clone(),
     };
 
-    let ok = group_verify(msg, signature, &temp_gpk);
-
-    if !ok {
+    if !group_verify(msg, signature, &temp_gpk) {
         return None;
     }
 
-    let maybe_expected = get_member_from_certificate_id(
-        manager,
-        signature.certificate.certificate_id,
-    );
-
-    if maybe_expected.is_none() {
-        return None;
-    }
-
-    let expected = maybe_expected.unwrap();
-
+    let expected = get_member_from_certificate_id(manager, signature.certificate.certificate_id)?;
     if expected != signature.certificate.member_id {
         return None;
     }
@@ -865,35 +757,11 @@ pub fn deserialise_group_sig(bytes: &[u8]) -> Option<GroupSignature> {
 
     let mut pos = 0usize;
 
-    let maybe_certificate_id = read_u64_at(bytes, &mut pos);
-    if maybe_certificate_id.is_none() {
-        return None;
-    }
-    let certificate_id = maybe_certificate_id.unwrap();
-
-    let maybe_member_id = read_u32_at(bytes, &mut pos);
-    if maybe_member_id.is_none() {
-        return None;
-    }
-    let member_id = maybe_member_id.unwrap();
-
-    let maybe_key_id = read_u32_at(bytes, &mut pos);
-    if maybe_key_id.is_none() {
-        return None;
-    }
-    let key_id = maybe_key_id.unwrap();
-
-    let maybe_issued_epoch = read_u64_at(bytes, &mut pos);
-    if maybe_issued_epoch.is_none() {
-        return None;
-    }
-    let issued_epoch = maybe_issued_epoch.unwrap();
-
-    let maybe_expiry_epoch = read_u64_at(bytes, &mut pos);
-    if maybe_expiry_epoch.is_none() {
-        return None;
-    }
-    let expiry_epoch = maybe_expiry_epoch.unwrap();
+    let certificate_id = read_u64_at(bytes, &mut pos)?;
+    let member_id = read_u32_at(bytes, &mut pos)?;
+    let key_id = read_u32_at(bytes, &mut pos)?;
+    let issued_epoch = read_u64_at(bytes, &mut pos)?;
+    let expiry_epoch = read_u64_at(bytes, &mut pos)?;
 
     if pos >= bytes.len() {
         return None;
@@ -901,70 +769,45 @@ pub fn deserialise_group_sig(bytes: &[u8]) -> Option<GroupSignature> {
     let role = bytes[pos];
     pos += 1;
 
-    let maybe_pk_seed = read_n_array_at(bytes, &mut pos);
-    if maybe_pk_seed.is_none() {
-        return None;
-    }
-    let pk_seed = maybe_pk_seed.unwrap();
-
-    let maybe_wots_pk = read_n_array_at(bytes, &mut pos);
-    if maybe_wots_pk.is_none() {
-        return None;
-    }
-    let wots_pk = maybe_wots_pk.unwrap();
+    let pk_seed = read_n_array_at(bytes, &mut pos)?;
+    let wots_pk = read_n_array_at(bytes, &mut pos)?;
 
     if pos + SIG_BYTES > bytes.len() {
         return None;
     }
-    let maybe_manager_signature = deserialise_sig(&bytes[pos..pos + SIG_BYTES]);
-    if maybe_manager_signature.is_none() {
-        return None;
-    }
-    let manager_signature = maybe_manager_signature.unwrap();
+    let manager_signature = deserialise_sig(&bytes[pos..pos + SIG_BYTES])?;
     pos += SIG_BYTES;
 
     let mut wots_signature = [[0u8; N]; WOTS_LEN];
     let mut i = 0usize;
     while i < WOTS_LEN {
-        let maybe_chain_value = read_n_array_at(bytes, &mut pos);
-        if maybe_chain_value.is_none() {
-            return None;
-        }
-        wots_signature[i] = maybe_chain_value.unwrap();
+        wots_signature[i] = read_n_array_at(bytes, &mut pos)?;
         i += 1;
     }
 
-    let certificate = MemberCertificate {
-        certificate_id: certificate_id,
-        member_id: member_id,
-        key_id: key_id,
-        issued_epoch: issued_epoch,
-        expiry_epoch: expiry_epoch,
-        role: role,
-        pk_seed: pk_seed,
-        wots_pk: wots_pk,
-        manager_signature: manager_signature,
-    };
-
-    let signature = GroupSignature {
-        certificate: certificate,
-        wots_signature: wots_signature,
-    };
-
-    Some(signature)
+    Some(GroupSignature {
+        certificate: MemberCertificate {
+            certificate_id,
+            member_id,
+            key_id,
+            issued_epoch,
+            expiry_epoch,
+            role,
+            pk_seed,
+            wots_pk,
+            manager_signature,
+        },
+        wots_signature,
+    })
 }
 
 /// Verify a raw encoded signature.
 pub fn group_verify_raw(msg: &[u8], sig_bytes: &[u8], gpk: &GroupPK) -> bool {
-    let maybe_sig = deserialise_group_sig(sig_bytes);
-
-    if maybe_sig.is_none() {
+    let Some(sig) = deserialise_group_sig(sig_bytes) else {
         return false;
-    }
+    };
 
-    let sig = maybe_sig.unwrap();
-    let ok = group_verify(msg, &sig, gpk);
-    ok
+    group_verify(msg, &sig, gpk)
 }
 
 /// Verify a raw encoded signature with policy.
@@ -974,15 +817,11 @@ pub fn group_verify_raw_with_policy(
     gpk: &GroupPK,
     policy: &CertificateValidationPolicy,
 ) -> bool {
-    let maybe_sig = deserialise_group_sig(sig_bytes);
-
-    if maybe_sig.is_none() {
+    let Some(sig) = deserialise_group_sig(sig_bytes) else {
         return false;
-    }
+    };
 
-    let sig = maybe_sig.unwrap();
-    let ok = group_verify_with_policy(msg, &sig, gpk, policy);
-    ok
+    group_verify_with_policy(msg, &sig, gpk, policy)
 }
 
 /// Identify a signer from raw bytes.
@@ -991,13 +830,7 @@ pub fn group_identify_member_raw(
     sig_bytes: &[u8],
     manager: &GroupManagerKey,
 ) -> Option<u32> {
-    let maybe_sig = deserialise_group_sig(sig_bytes);
-
-    if maybe_sig.is_none() {
-        return None;
-    }
-
-    let sig = maybe_sig.unwrap();
+    let sig = deserialise_group_sig(sig_bytes)?;
     group_identify_member(msg, &sig, manager)
 }
 
@@ -1058,7 +891,12 @@ mod tests {
         let mut ok_policy = CertificateValidationPolicy::new(10);
         ok_policy.check_role = true;
         ok_policy.required_role = 7;
-        assert!(group_verify_with_policy(b"policy test", &sig, &gpk, &ok_policy));
+        assert!(group_verify_with_policy(
+            b"policy test",
+            &sig,
+            &gpk,
+            &ok_policy
+        ));
 
         let mut wrong_role = ok_policy.clone();
         wrong_role.required_role = 1;
@@ -1112,7 +950,10 @@ mod tests {
         assert!(group_verify_raw(b"raw group", &raw, &gpk));
 
         let parsed = deserialise_group_sig(&raw).expect("raw signature should parse");
-        assert_eq!(parsed.certificate.certificate_id, sig.certificate.certificate_id);
+        assert_eq!(
+            parsed.certificate.certificate_id,
+            sig.certificate.certificate_id
+        );
         assert_eq!(parsed.certificate.member_id, sig.certificate.member_id);
         assert_eq!(parsed.certificate.key_id, sig.certificate.key_id);
 
@@ -1132,8 +973,7 @@ mod tests {
 
         let mut derived = derive_member_key(&mut manager, member_id, 1)
             .expect("existing member should be derivable");
-        let sig =
-            group_sign(b"derived member", &mut derived).expect("derived member should sign");
+        let sig = group_sign(b"derived member", &mut derived).expect("derived member should sign");
 
         assert!(group_verify(b"derived member", &sig, &gpk));
         assert_eq!(

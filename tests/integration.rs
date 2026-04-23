@@ -1,13 +1,13 @@
 use sphincs_rs::group::{
-    CertificateValidationPolicy, add_member, certify_new_keys_for_member, group_identify_member,
-    group_keygen, group_sign, group_verify, group_verify_raw, group_verify_with_policy,
-    serialise_group_sig, set_manager_epoch, set_member_role,
+    add_member, certify_new_keys_for_member, group_identify_member, group_keygen, group_sign,
+    group_verify, group_verify_raw, group_verify_with_policy, serialise_group_sig,
+    set_manager_epoch, set_member_role, CertificateValidationPolicy,
 };
 use sphincs_rs::hash::{RawSha256, Sha256Hasher};
 use sphincs_rs::params::N;
 use sphincs_rs::sphincs::{
-    SIG_BYTES, SphincsPK, deserialise_sig, serialise_sig, slh_keygen_fast, slh_sign_fast,
-    slh_sign_raw_fast, slh_verify, slh_verify_raw,
+    deserialise_sig, serialise_sig, slh_keygen_fast, slh_sign_fast, slh_sign_raw_fast, slh_verify,
+    slh_verify_raw, SphincsPK, SIG_BYTES,
 };
 
 macro_rules! test_with_hasher {
@@ -17,7 +17,10 @@ macro_rules! test_with_hasher {
         let msg = b"UNSW 26T1 Applied Cryptography integration test";
 
         let sig = slh_sign_fast::<$H>(msg, &sk);
-        assert!(slh_verify::<$H>(msg, &sig, &pk), "[{tag}] valid sig rejected");
+        assert!(
+            slh_verify::<$H>(msg, &sig, &pk),
+            "[{tag}] valid sig rejected"
+        );
         assert!(
             !slh_verify::<$H>(b"wrong", &sig, &pk),
             "[{tag}] wrong message accepted"
@@ -152,8 +155,7 @@ fn integration_group_public_api_roundtrip() {
     let mut member = add_member(&mut manager, 0).expect("member should be created");
     let member_id = member.member_id;
     set_member_role(&mut manager, member_id, 4).expect("role should be assigned");
-    certify_new_keys_for_member(&mut manager, &mut member, 1)
-        .expect("new key should be certified");
+    certify_new_keys_for_member(&mut manager, &mut member, 1).expect("new key should be certified");
 
     let msg = b"group integration roundtrip";
     let sig = group_sign(msg, &mut member).expect("group signing should succeed");

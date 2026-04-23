@@ -23,7 +23,7 @@
 //! Alg. 19 → `slh_sign[_fast]`
 //! Alg. 20 → `slh_verify`
 
-use rand::{RngCore, rngs::OsRng};
+use rand::{rngs::OsRng, RngCore};
 
 use crate::adrs::{Adrs, AdrsType};
 use crate::fors::{self, ForsSig, ForsTreeSig};

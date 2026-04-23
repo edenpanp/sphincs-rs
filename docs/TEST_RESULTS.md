@@ -1,15 +1,17 @@
 # Test Results
 
 **Machine:** MacBook Pro, Apple M2 Max, macOS 26.4.1, rustc 1.94.1 (Homebrew)  
-**Branch:** `docs-Aaron`  
 **Where run:** locally on the development machine  
-**Last full test run:** before the merge-conflict cleanup
+**Last full test run:** recorded during the project validation phase
 
 ---
 
 ## Build note
 
-The previous merge-conflict markers in `src/group.rs`, `src/xmss.rs`, and `benches/sphincs_bench.rs` have been cleaned up. The results below are still the recorded test results from the last full clean run; the latest lightweight compile check was `cargo check --features test-utils`.
+The previous merge-conflict markers in `src/group.rs`, `src/xmss.rs`, and
+`benches/sphincs_bench.rs` have been cleaned up. The results below are recorded
+project-validation results; re-run the commands before final submission if any
+code changes are made.
 
 ```bash
 cargo check
@@ -21,13 +23,17 @@ cargo test --test kat
 
 | Command | Result |
 |---------|--------|
-| `cargo check` | PASS — 0 errors, 0 warnings |
-| `cargo test --lib` | PASS |
-| `cargo test` | PASS — recorded clean run before the current conflicts |
+| `cargo check --features test-utils` | PASS in the recorded lightweight check |
+| `cargo test --features test-utils --lib` | 54 library tests discovered; PASS in the recorded clean run |
+| `cargo test` | PASS in the recorded clean run |
 | `cargo test --features test-utils --test integration` | PASS — 10/10 |
 | `cargo test --test kat` | PASS — parser tests always run; file-based tests run if the KAT file is in place |
 
-The repository currently contains 79 `#[test]` functions across `src/` and `tests/`, but they are not all exercised by the same command or feature set.
+The repository currently contains 75 `#[test]` markers across `src/` and
+`tests/`. Of these, 69 are exercised by the normal Cargo commands listed above:
+54 library tests, 10 integration tests, and 5 KAT-related tests. The remaining
+6 are in `src/group_impl_helpers.rs`, which is not currently included by
+`src/lib.rs`.
 
 ---
 
@@ -62,8 +68,7 @@ All 10 integration tests passed in the recorded clean run. [`tests/integration.r
 | `integration_bit_flip_rejection` | single-bit flips at 8 positions across the signature all cause verification failure | PASS |
 | `integration_multiple_keypairs` | 3 keypairs; each sig validates under its own key and fails under the other two | PASS |
 | `sig_bytes_constant_correct` | `SIG_BYTES` == `N + K*(1+A)*N + D*(WOTS_LEN+HP)*N` == 29 792 | PASS |
-| `group_root_helper_matches_keygen` | `compute_group_root` reproduces the root from `group_keygen` | PASS |
-| `group_search_r_hits_target` | `search_r` lands on the expected leaf index for member 3 | PASS |
+| `integration_group_public_api_roundtrip` | member provisioning, public verify, raw verify, signer identification, and role policy checks all succeed together | PASS |
 
 A few of these are worth calling out:
 
@@ -71,6 +76,7 @@ A few of these are worth calling out:
 - `integration_bit_flip_rejection` samples tampering in different parts of the signature and confirms verification fails
 - `sig_bytes_constant_correct` independently recomputes the expected signature size from the parameters
 - `integration_multiple_keypairs` checks that signatures only verify under the correct public key
+- `integration_group_public_api_roundtrip` exercises the current certificate-backed group workflow rather than the older fixed-leaf prototype helpers
 
 The separate baseline-vs-alpha integration and timing comparison is documented in [ALPHA_COMPARISON_REPORT.md](./ALPHA_COMPARISON_REPORT.md).
 

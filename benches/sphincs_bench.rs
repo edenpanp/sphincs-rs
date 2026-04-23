@@ -334,54 +334,105 @@ criterion_main!(benches);
 
 fn bench_group(c: &mut Criterion) {
     use sphincs_rs::group::{
-        derive_member_key, group_identify_member, group_keygen, group_sign, group_verify,
+        CertificateValidationPolicy, add_member, certify_new_keys_for_member, group_identify_member,
+        group_keygen, group_sign, group_verify, group_verify_with_policy, set_manager_epoch,
+        set_member_role,
     };
 
     let mut g = c.benchmark_group("group");
     g.sample_size(10);
 
-    // group_keygen: same cost as slh_keygen_fast (builds one XMSS tree)
+    // group_keygen: manager SPHINCS+ key generation for the certificate authority.
     g.bench_function("keygen/RawSha256", |b| {
-        b.iter(|| group_keygen::<RawSha256>())
+        b.iter(group_keygen)
     });
 
-    // group_sign for a single member (no extra overhead vs slh_sign_fast)
+    // Provision one member with one certified WOTS+ key.
+    g.bench_function("provision_member", |b| {
+        b.iter_batched(
+            group_keygen,
+            |(mut manager, _gpk)| {
+                set_manager_epoch(&mut manager, 3);
+                let mut member = add_member(&mut manager, 0).expect("member");
+                let member_id = member.member_id;
+                set_member_role(&mut manager, member_id, 4).expect("role");
+                certify_new_keys_for_member(&mut manager, &mut member, 1).expect("certified key");
+                (manager, member)
+            },
+            BatchSize::SmallInput,
+        )
+    });
+
+    // group_sign: member signs with the first unused certified key.
     g.bench_function("sign/RawSha256", |b| {
         b.iter_batched(
             || {
-                let (mgr, _gpk) = group_keygen::<RawSha256>();
-                let msk = derive_member_key(&mgr, 0);
-                msk
+                let (mut manager, _gpk) = group_keygen();
+                set_manager_epoch(&mut manager, 3);
+                let mut member = add_member(&mut manager, 0).expect("member");
+                let member_id = member.member_id;
+                set_member_role(&mut manager, member_id, 4).expect("role");
+                certify_new_keys_for_member(&mut manager, &mut member, 1).expect("certified key");
+                member
             },
-            |msk| group_sign::<RawSha256>(b"bench message", &msk),
+            |mut member| group_sign(b"bench message", &mut member),
             BatchSize::SmallInput,
         )
     });
 
-    // group_verify: same as slh_verify
+    // group_verify: public verification of the certificate-backed group signature.
     g.bench_function("verify/RawSha256", |b| {
         b.iter_batched(
             || {
-                let (mgr, gpk) = group_keygen::<RawSha256>();
-                let msk = derive_member_key(&mgr, 0);
-                let sig = group_sign::<RawSha256>(b"bench message", &msk);
+                let (mut manager, gpk) = group_keygen();
+                set_manager_epoch(&mut manager, 3);
+                let mut member = add_member(&mut manager, 0).expect("member");
+                let member_id = member.member_id;
+                set_member_role(&mut manager, member_id, 4).expect("role");
+                certify_new_keys_for_member(&mut manager, &mut member, 1).expect("certified key");
+                let sig = group_sign(b"bench message", &mut member).expect("sign");
                 (sig, gpk)
             },
-            |(sig, gpk)| group_verify::<RawSha256>(b"bench message", &sig, &gpk),
+            |(sig, gpk)| group_verify(b"bench message", &sig, &gpk),
             BatchSize::SmallInput,
         )
     });
 
-    // group_identify: linear scan over all members (O(M) WOTS+ verifications)
+    // group_identify_member: manager-side lookup via the issued-certificate registry.
     g.bench_function("identify/RawSha256", |b| {
         b.iter_batched(
             || {
-                let (mgr, _gpk) = group_keygen::<RawSha256>();
-                let msk = derive_member_key(&mgr, 7);
-                let sig = group_sign::<RawSha256>(b"identify bench", &msk);
-                (mgr, sig)
+                let (mut manager, _gpk) = group_keygen();
+                set_manager_epoch(&mut manager, 3);
+                let mut member = add_member(&mut manager, 0).expect("member");
+                let member_id = member.member_id;
+                set_member_role(&mut manager, member_id, 4).expect("role");
+                certify_new_keys_for_member(&mut manager, &mut member, 1).expect("certified key");
+                let sig = group_sign(b"identify bench", &mut member).expect("sign");
+                (manager, sig)
             },
-            |(mgr, sig)| group_identify_member::<RawSha256>(b"identify bench", &sig, &mgr),
+            |(manager, sig)| group_identify_member(b"identify bench", &sig, &manager),
+            BatchSize::SmallInput,
+        )
+    });
+
+    // Policy verification checks certificate metadata such as role and revocation lists.
+    g.bench_function("policy_verify/RawSha256", |b| {
+        b.iter_batched(
+            || {
+                let (mut manager, gpk) = group_keygen();
+                set_manager_epoch(&mut manager, 3);
+                let mut member = add_member(&mut manager, 0).expect("member");
+                let member_id = member.member_id;
+                set_member_role(&mut manager, member_id, 4).expect("role");
+                certify_new_keys_for_member(&mut manager, &mut member, 1).expect("certified key");
+                let sig = group_sign(b"policy bench", &mut member).expect("sign");
+                let mut policy = CertificateValidationPolicy::new(3);
+                policy.check_role = true;
+                policy.required_role = 4;
+                (gpk, sig, policy)
+            },
+            |(gpk, sig, policy)| group_verify_with_policy(b"policy bench", &sig, &gpk, &policy),
             BatchSize::SmallInput,
         )
     });
