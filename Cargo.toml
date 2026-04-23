@@ -4,25 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-# Expose RawSha256 and other test utilities to integration tests and benchmarks.
-test-utils = []
-# Enable Rayon-based parallel leaf generation (optimisation 1).
 parallel = ["dep:rayon"]
 
 [dependencies]
-hex      = "0.4.3"
-rand     = "0.8"
-sha2     = "0.10.9"
-hmac     = "0.12"
-aes-gcm  = "0.10"
-rayon    = { version = "1.10", optional = true }
+hex = "0.4.3"
+rand = "0.8"
+rayon = { version = "1.10", optional = true }
+sha2 = "0.10.9"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-hex       = "0.4.3"
-rand      = "0.8"
+hex = "0.4.3"
+rand = "0.8"
 
 [[bench]]
-name              = "sphincs_bench"
-harness           = false
-required-features = ["test-utils"]
+name = "sphincs_bench"
+harness = false
