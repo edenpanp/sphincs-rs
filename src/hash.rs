@@ -1,117 +1,46 @@
-//! Tweakable hash function abstraction for SPHINCS+.
+//! Tweakable hash function abstraction for SPHINCS+
 //!
-//! This module defines the [`SphincsHasher`] trait plus two concrete implementations:
+//! Two implementations:
+//! - Sha256Hasher: compliant version (used for KAT)
+//! - RawSha256: simplified version (for testing / benchmarking)
+//! Note: RawSha256 is only used for benchmarking and structural validation
+//! All security-relevant evaluations use Sha256Hasher
 //!
-//! - [`Sha256Hasher`] - SPHINCS+-SHA2-256s-simple backend.
-//! - [`RawSha256`]    – non-compliant test hasher for structural unit tests.
-//!
-//! # SPHINCS+-SHA2-256s-simple instantiation
-//!
-//! The bundled KAT vectors target the original SPHINCS+ SHA2 simple
-//! instantiation. It uses SHA-256 throughout, without robust bitmasks.
-//!
-//! # Compressed ADRS (ADRSc) – 22 bytes
-//!
-//! The 32-byte ADRS is compressed by dropping leading-zero padding bytes:
-//! ```text
-//! ADRSc = layer_address[3]     (1 byte  – lowest byte of the 4-byte field)
-//!       ‖ tree_address[4..12]  (8 bytes – lower 8 bytes, drops 4-byte padding)
-//!       ‖ type_byte            (1 byte  – lowest byte of the 4-byte type field)
-//!       ‖ type_bits[0..12]    (12 bytes – all type-specific bytes, unmodified)
-//! total = 22 bytes
-//! ```
-
 use crate::adrs::Adrs;
 use crate::params::{M, N};
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
-
-/// The SPHINCS+ tweakable hash function family interface.
-///
-/// All methods are associated functions (no `&self`) so they can be called
-/// as `S::prf(...)` for a type parameter `S: SphincsHasher`.
 pub trait SphincsHasher {
-    /// `PRF(PK.seed, SK.seed, ADRS) → N bytes`
-    ///
-    /// Derives one WOTS+ or FORS secret key element from the master secret seed.
+
     fn prf(pk_seed: &[u8; N], sk_seed: &[u8; N], adrs: &Adrs) -> [u8; N];
-
-    /// `PRF_msg(SK.prf, opt_rand, M) → N bytes`
-    ///
-    /// Derives per-message randomness R during signing.
-    /// `opt_rand` = `PK.seed` for deterministic signing; fresh randomness otherwise.
     fn prf_msg(sk_prf: &[u8; N], opt_rand: &[u8; N], msg: &[u8]) -> [u8; N];
-
-    /// `H_msg(R, PK.seed, PK.root, M) → M bytes`
-    ///
-    /// Produces the `M`-byte message digest split into FORS indices + tree indices.
     fn h_msg(r: &[u8; N], pk_seed: &[u8; N], pk_root: &[u8; N], msg: &[u8]) -> [u8; M];
-
-    /// `F(PK.seed, ADRS, M₁) → N bytes`
-    ///
-    /// Single-input tweakable hash; one step in a WOTS+ chain.
     fn f(pk_seed: &[u8; N], adrs: &Adrs, m: &[u8; N]) -> [u8; N];
-
-    /// `H(PK.seed, ADRS, M₁ ‖ M₂) → N bytes`
-    ///
-    /// Two-input tweakable hash; computes one internal Merkle tree node.
     fn h_two(pk_seed: &[u8; N], adrs: &Adrs, left: &[u8; N], right: &[u8; N]) -> [u8; N];
-
-    /// `T_l(PK.seed, ADRS, M₁ ‖ … ‖ Mₗ) → N bytes`
-    ///
-    /// l-input tweakable hash; compresses `WOTS_LEN` chain tips into one WOTS+ PK,
-    /// or compresses `K` FORS roots into the FORS public key.
     fn t_l(pk_seed: &[u8; N], adrs: &Adrs, inputs: &[[u8; N]]) -> [u8; N];
 }
 
 // ── SHA-256 internal primitives ───────────────────────────────────────────────
-
-/// Compress a 32-byte ADRS into the 22-byte SHA-2 format `ADRSc`
-/// (FIPS 205 §11.1).
-///
-/// ```text
-/// ADRSc[0]      = layer_address[3]          (drop 3 leading zero bytes)
-/// ADRSc[1..9]   = tree_address[4..12]       (drop 4 leading zero bytes)
-/// ADRSc[9]      = type.to_be_bytes()[3]     (drop 3 leading zero bytes)
-/// ADRSc[10..22] = type_bits[0..12]          (unmodified)
-/// ```
+/// Compress ADRS → 22 bytes (required by SHA2 version)
 fn compress_adrs(adrs: &Adrs) -> [u8; 22] {
     let mut out = [0u8; 22];
-    // layer_address: take only the lowest byte
     out[0] = adrs.layer_address[3];
-    // tree_address: take only the lower 8 bytes (bytes 4..12 of the 12-byte field)
     out[1..9].copy_from_slice(&adrs.tree_address[4..12]);
-    // type: take only the lowest byte
     out[9] = adrs.adrs_type.to_u32().to_be_bytes()[3];
-    // type_bits: all 12 bytes unchanged
     out[10..22].copy_from_slice(&adrs.type_bits);
     out
 }
 
-/// Build the common SHA-256 prefix `PK.seed ‖ toByte(0, 64−N) ‖ ADRSc`.
-///
-/// This 86-byte prefix is shared by `PRF`, `F`, `H`, and `T_l`.
-/// It ensures domain separation via `ADRSc` and block-aligns the input.
-///
-/// Layout: `PK.seed(32) ‖ zeros(32) ‖ ADRSc(22)` = 86 bytes.
+/// Common prefix used by most hash calls
 fn build_prefix(pk_seed: &[u8; N], adrs: &Adrs) -> [u8; 86] {
-    // SHA-256 block size = 64 bytes; padding = 64 - N = 64 - 32 = 32 zero bytes.
     let mut prefix = [0u8; 86]; // 32 + 32 + 22
     prefix[0..32].copy_from_slice(pk_seed);
-    // bytes 32..64 remain zero (the toByte(0, 64-N) padding)
     let adrs_c = compress_adrs(adrs);
     prefix[64..86].copy_from_slice(&adrs_c);
     prefix
 }
 
-/// MGF1 (Mask Generation Function) with SHA-256 (PKCS #1 v2.2 §B.2.1).
-///
-/// Produces `length` pseudorandom bytes from `seed`:
-/// ```text
-/// for i = 0, 1, … :
-///     output ‖= SHA-256(seed ‖ toByte(i, 4))
-/// return output[0..length]
-/// ```
+/// MGF1 (used in H_msg)
 fn mgf1_sha256(seed: &[u8], length: usize) -> Vec<u8> {
     use sha2::{Digest, Sha256};
     let mut out = Vec::with_capacity(length + 32);
@@ -127,19 +56,11 @@ fn mgf1_sha256(seed: &[u8], length: usize) -> Vec<u8> {
     out
 }
 
-/// HMAC-SHA-256 (RFC 2104) without external crate dependencies.
-///
-/// ```text
-/// key  → normalise to 64 bytes (hash if > 64, zero-pad if < 64)
-/// ipad = key XOR 0x36_repeated
-/// opad = key XOR 0x5C_repeated
-/// HMAC = SHA-256(opad ‖ SHA-256(ipad ‖ data))
-/// ```
+/// Minimal HMAC-SHA256 (no external crate)
 fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; N] {
     use sha2::{Digest, Sha256};
     const BLOCK: usize = 64;
 
-    // Normalise key to exactly BLOCK bytes
     let mut k = [0u8; BLOCK];
     if key.len() > BLOCK {
         let hk: [u8; 32] = Sha256::digest(key).into();
@@ -148,7 +69,6 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; N] {
         k[..key.len()].copy_from_slice(key);
     }
 
-    // Compute ipad and opad keys
     let mut ipad_key = [0u8; BLOCK];
     let mut opad_key = [0u8; BLOCK];
     for i in 0..BLOCK {
@@ -156,13 +76,11 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; N] {
         opad_key[i] = k[i] ^ 0x5C;
     }
 
-    // Inner hash: SHA-256(ipad_key ‖ data)
     let mut inner = Sha256::new();
     inner.update(ipad_key);
     inner.update(data);
     let inner_hash: [u8; 32] = inner.finalize().into();
 
-    // Outer hash: SHA-256(opad_key ‖ inner_hash)
     let mut outer = Sha256::new();
     outer.update(opad_key);
     outer.update(inner_hash);
@@ -174,7 +92,7 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; N] {
 /// Original SPHINCS+-SHA2-256s-simple backend.
 ///
 /// This matches the bundled `PQCsignKAT_128.rsp` vectors, which predate
-/// the FIPS 205 SHA2 changes.
+/// the FIPS 205 SHA2 changes
 pub struct Sha256Hasher;
 
 impl SphincsHasher for Sha256Hasher {
@@ -190,9 +108,6 @@ impl SphincsHasher for Sha256Hasher {
         h.finalize().into()
     }
 
-    /// `PRF_msg(SK.prf, opt_rand, M)` (SPHINCS+ §7 SHA-256 instantiation)
-    ///
-    /// `HMAC-SHA-256(SK.prf, opt_rand ‖ M)`
     fn prf_msg(sk_prf: &[u8; N], opt_rand: &[u8; N], msg: &[u8]) -> [u8; N] {
         let mut data = Vec::with_capacity(N + msg.len());
         data.extend_from_slice(opt_rand);
@@ -200,12 +115,6 @@ impl SphincsHasher for Sha256Hasher {
         hmac_sha256(sk_prf, &data)
     }
 
-    /// `H_msg(R, PK.seed, PK.root, M)` (SPHINCS+ §F.2 SHA-256 instantiation)
-    ///
-    /// ```text
-    /// seed   = SHA-256(R ‖ PK.seed ‖ PK.root ‖ M)
-    /// H_msg  = MGF1-SHA-256(seed, m)
-    /// ```
     fn h_msg(r: &[u8; N], pk_seed: &[u8; N], pk_root: &[u8; N], msg: &[u8]) -> [u8; M] {
         use sha2::{Digest, Sha256};
 
@@ -222,9 +131,6 @@ impl SphincsHasher for Sha256Hasher {
         out
     }
 
-    /// `F(PK.seed, ADRS, M₁)` (FIPS 205 §11.2.1)
-    ///
-    /// `SHA-256(PK.seed ‖ toByte(0, 64−n) ‖ ADRSc ‖ M₁)`
     fn f(pk_seed: &[u8; N], adrs: &Adrs, m: &[u8; N]) -> [u8; N] {
         use sha2::{Digest, Sha256};
         let prefix = build_prefix(pk_seed, adrs);
@@ -234,9 +140,6 @@ impl SphincsHasher for Sha256Hasher {
         h.finalize().into()
     }
 
-    /// `H(PK.seed, ADRS, M₁ ‖ M₂)` (SPHINCS+ §7 SHA-256 instantiation)
-    ///
-    /// `SHA-256(PK.seed ‖ toByte(0, 64−n) ‖ ADRSc ‖ M₁ ‖ M₂)`
     fn h_two(pk_seed: &[u8; N], adrs: &Adrs, left: &[u8; N], right: &[u8; N]) -> [u8; N] {
         use sha2::{Digest, Sha256};
         let prefix = build_prefix(pk_seed, adrs);
@@ -247,9 +150,6 @@ impl SphincsHasher for Sha256Hasher {
         h.finalize().into()
     }
 
-    /// `T_l(PK.seed, ADRS, M₁ ‖ … ‖ Mₗ)` (SPHINCS+ §7 SHA-256 instantiation)
-    ///
-    /// `SHA-256(PK.seed ‖ toByte(0, 64−n) ‖ ADRSc ‖ M₁ ‖ … ‖ Mₗ)`
     fn t_l(pk_seed: &[u8; N], adrs: &Adrs, inputs: &[[u8; N]]) -> [u8; N] {
         use sha2::{Digest, Sha256};
         let prefix = build_prefix(pk_seed, adrs);
@@ -264,14 +164,10 @@ impl SphincsHasher for Sha256Hasher {
 
 // ── RawSha256 (test-only) ─────────────────────────────────────────────────────
 
-/// Non-compliant SHA-256 hasher for structural unit and integration tests.
-///
-/// Uses plain SHA-256 concatenation without the spec-mandated padding and
-/// ADRS compression, so it is **not** FIPS 205 compliant.  Use only to
-/// verify structural logic (sign → verify round-trips).
+/// Not standard-compliant, just for testing speed/logic
 ///
 /// Always compiled — no feature gate — so integration tests and benchmarks
-/// can import it without `--features test-utils`.
+/// can import it without `--features test-utils`
 pub struct RawSha256;
 
 impl SphincsHasher for RawSha256 {
@@ -353,7 +249,7 @@ mod tests {
 
     // ── compress_adrs ─────────────────────────────────────────────────────────
 
-    /// Compressed ADRS must be exactly 22 bytes with correct field extraction.
+    /// Compressed ADRS must be exactly 22 bytes with correct field extraction
     #[test]
     fn compress_adrs_field_positions() {
         let mut adrs = Adrs::new(AdrsType::Wots);
@@ -379,7 +275,7 @@ mod tests {
 
     // ── MGF1 ─────────────────────────────────────────────────────────────────
 
-    /// MGF1 output length must match request.
+    /// MGF1 output length must match request
     #[test]
     fn mgf1_output_length() {
         for len in [0, 1, 31, 32, 33, 47, 64, 100] {
@@ -395,7 +291,7 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    /// Different seeds must produce different outputs (with overwhelming probability).
+    /// Different seeds must produce different outputs (with overwhelming probability)
     #[test]
     fn mgf1_different_seeds() {
         let a = mgf1_sha256(b"seed_a", 32);
@@ -426,7 +322,7 @@ mod tests {
     /// Expected (verified with Python hmac + OpenSSL):
     ///   5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843
     /// Note: the original RFC 4231 text contains a typo in the last 4 bytes;
-    /// the value above is the cryptographically correct result.
+    /// the value above is the cryptographically correct result
     #[test]
     fn hmac_sha256_rfc4231_tc2() {
         let key = b"Jefe";
@@ -465,7 +361,7 @@ mod tests {
 
     // ── Sha256Hasher self-consistency ─────────────────────────────────────────
 
-    /// PRF must be deterministic.
+    /// PRF must be deterministic
     #[test]
     fn sha256_prf_deterministic() {
         let pk_seed = [0x01u8; N];
@@ -519,7 +415,7 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    /// F, H, T_l must all be deterministic and mutually distinct.
+    /// F, H, T_l must all be deterministic and mutually distinct
     #[test]
     fn sha256_tweakable_hashes_deterministic_and_distinct() {
         let pk_seed = [0xFFu8; N];
@@ -542,7 +438,7 @@ mod tests {
         assert_eq!(h_out, tl_out, "H and T_l with identical inputs must agree");
     }
 
-    /// WOTS+ round-trip using the production Sha256Hasher.
+    /// WOTS+ round-trip using the production Sha256Hasher
     #[test]
     fn wots_roundtrip_with_sha256_hasher() {
         use crate::adrs::AdrsType;
