@@ -145,33 +145,32 @@ directory.
 ## What Has Been Implemented
 Implemented in the current version:
 
-- `WOTS+ key generation, signing, and public key recovery;
-- `FORS signing and public key reconstruction;
-- `XMSS signing and authentication path verification;
-- `hypertree signing and verification;
-- `top-level SPHINCS+ key generation, signing, and verification;
-- `SHA-256 hasher abstraction;
-- `simpler RawSha256 backend for testing and profiling;
-- `raw-byte signature serialisation and deserialisation;
-- `baseline and fast XMSS paths;
-- `optional Rayon-based leaf parallelism;
-- `parameter comparison module;
-- `experimental certificate-backed group extension;
-- `manager-issued member certificates;
-- `member WOTS+-based signing;
-- `public group verification;
-- `manager-side member identification;
-- `simple role and revocation policy checks.
+- WOTS+ key generation, signing, and public key recovery;
+- FORS signing and public key reconstruction;
+- XMSS signing and authentication path verification;
+- hypertree signing and verification;
+- top-level SPHINCS+ key generation, signing, and verification;
+- SHA-256 hasher abstraction;
+- simpler RawSha256 backend for testing and profiling;
+- raw-byte signature serialisation and deserialisation;
+- baseline and fast XMSS paths;
+- optional Rayon-based leaf parallelism;
+- parameter comparison module;
+- experimental certificate-backed group extension;
+- manager-issued member certificates;
+- member WOTS+-based signing;
+- public group verification;
+- manager-side member identification;
+- simple role and revocation policy checks.
 
 ## Current limitation
 
-- `the code is a prototype and has not been externally audited;
-- `the group extension is not a complete DGSP implementation;
-- `the group extension does not yet include a full join protocol;
-- `public certificate distribution is not fully implemented;
-- `there is no complete judge procedure;
-- `revocation is currently handled through simple policy lists;
-- `certificate lifecycle management is still minimal;
-- `group signing is very slow in the current demo;
-- `the parameter experiment module compares parameter trade-offs but does not
-- `replace the whole implementation with a complete alpha-style scheme.
+- the group extension is not a complete DGSP implementation;
+- the group extension does not yet include a full join protocol;
+- public certificate distribution is not fully implemented;
+- there is no complete judge procedure;
+- revocation is currently handled through simple policy lists;
+- certificate lifecycle management is still minimal;
+- group signing is very slow in the current demo;
+- the parameter experiment module compares parameter trade-offs but does not
+- replace the whole implementation with a complete alpha-style scheme.
