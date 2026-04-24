@@ -1,11 +1,30 @@
 # sphincs-rs
 
-Rust implementation of SPHINCS+ / SLH-DSA for the UNSW COMP3453 Applied
-Cryptography term project. The main target is the
-SPHINCS+-SHA2-256s-simple-style parameter set, with an optimised XMSS tree path,
-Criterion benchmarks, and an experimental group-signature layer.
+This repository contains a Rust implementation of a SPHINCS+-style hash-based
+signature scheme, together with an experimental certificate-backed group-signature
+extension.
 
-Last updated: 2026-04-23.
+The main part of the project implements the SPHINCS+ signing workflow using
+WOTS+, FORS, XMSS, and a hypertree. The group extension is built on top of the
+SPHINCS+ code and is used to demonstrate manager-issued certificates, member
+signing keys, public verification, manager-side signer identification, and simple
+policy checks.
+
+The main SPHINCS+ workflow is the primary implementation target. The group-signature layer is experimental DGSP implementation.
+
+Last updated: 2026-04-24.
+
+## Project Overview
+
+The implementation is organised around the following goals:
+- implement the main SPHINCS+ signing flow in Rust;
+- keep WOTS+, FORS, XMSS, hypertree signing, hashing, and address handling in
+  separate modules;
+- support both a clearer baseline path and a faster XMSS path;
+- provide raw-byte serialisation and deserialisation for signatures;
+- include a hash abstraction so different hash backends can be tested;
+- add a lightweight group-style extension on top of the main SPHINCS+ code.
+
 
 ## Scope
 
@@ -122,3 +141,37 @@ Start here:
 
 The final project report is maintained separately in the sibling `paper`
 directory.
+
+## What Has Been Implemented
+Implemented in the current version:
+
+- `WOTS+ key generation, signing, and public key recovery;
+- `FORS signing and public key reconstruction;
+- `XMSS signing and authentication path verification;
+- `hypertree signing and verification;
+- `top-level SPHINCS+ key generation, signing, and verification;
+- `SHA-256 hasher abstraction;
+- `simpler RawSha256 backend for testing and profiling;
+- `raw-byte signature serialisation and deserialisation;
+- `baseline and fast XMSS paths;
+- `optional Rayon-based leaf parallelism;
+- `parameter comparison module;
+- `experimental certificate-backed group extension;
+- `manager-issued member certificates;
+- `member WOTS+-based signing;
+- `public group verification;
+- `manager-side member identification;
+- `simple role and revocation policy checks.
+
+## Current limitation
+
+- `the code is a prototype and has not been externally audited;
+- `the group extension is not a complete DGSP implementation;
+- `the group extension does not yet include a full join protocol;
+- `public certificate distribution is not fully implemented;
+- `there is no complete judge procedure;
+- `revocation is currently handled through simple policy lists;
+- `certificate lifecycle management is still minimal;
+- `group signing is very slow in the current demo;
+- `the parameter experiment module compares parameter trade-offs but does not
+- `replace the whole implementation with a complete alpha-style scheme.
