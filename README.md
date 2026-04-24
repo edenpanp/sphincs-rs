@@ -172,5 +172,4 @@ Implemented in the current version:
 - revocation is currently handled through simple policy lists;
 - certificate lifecycle management is still minimal;
 - group signing is very slow in the current demo;
-- the parameter experiment module compares parameter trade-offs but does not
-- replace the whole implementation with a complete alpha-style scheme.
+- the parameter experiment module compares parameter trade-offs but does not replace the whole implementation with a complete alpha-style scheme.
