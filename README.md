@@ -172,3 +172,27 @@ Implemented in the current version:
 - revocation is currently handled through simple policy lists;
 - certificate lifecycle management is still minimal;
 - group signing is very slow in the current demo.
+
+## Repository Structure
+
+```text
+.
+├── benches/                  # benchmarking code
+│   └── sphincs_bench.rs
+├── demo/                     # interactivity demo
+│   ├── README.md
+│   └── main.rs
+├── docs/                     # project papers and references
+│   └── ...
+├── src-base/                 # baseline & alpha variants
+│   └── ...
+├── src/                      # Rust source code after encapsulating the module & group signature
+│   └── ...
+├── tests/                    # tests
+│   ├── PQCsignKAT_128.rsp
+│   ├── integration.rs
+│   └── kat.rs
+│   Cargo-base.toml
+│   Cargo.lock
+│   Cargo.toml
+└── README.md
