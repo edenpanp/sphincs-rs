@@ -172,7 +172,33 @@ Implemented in the current version:
 - revocation is currently handled through simple policy lists;
 - certificate lifecycle management is still minimal;
 - group signing is very slow in the current demo.
+---
 
+## Reference Papers
+
+The implementation is based primarily on the following paper:
+
+- **SPHINCS+ Design Paper**  
+  https://eprint.iacr.org/2019/1086.pdf
+
+Possible optimisation and variation references include:
+
+- **SPHINCS-alpha**  
+  https://eprint.iacr.org/2022/059.pdf
+
+- **SPHINCS+C**  
+  https://eprint.iacr.org/2022/778.pdf
+
+- Additional related work:  
+  https://eprint.iacr.org/2025/889.pdf  
+  https://eprint.iacr.org/2025/2236.pdf
+
+A possible extension topic:
+
+- **SPHINCS+ as a group signature scheme**  
+  https://eprint.iacr.org/2025/760.pdf
+
+---
 ## Repository Structure
 
 ```text
