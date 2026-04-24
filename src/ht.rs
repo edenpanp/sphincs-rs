@@ -1,19 +1,10 @@
-//! HT (Hypertree) - D stacked XMSS layers.
+//! Hypertree (HT) implementation: D layers of XMSS
 //!
-//! Provides two signing strategies mirroring `xmss`:
+//! Two versions of signing:
+//! - ht_sign: baseline (recursive XMSS)
+//! - ht_sign_fast: optimised (iterative + optional parallel)
 //!
-//! | Function        | XMSS strategy used        | Leaf parallelism |
-//! |-----------------|---------------------------|------------------|
-//! | `ht_sign`       | recursive baseline        | no               |
-//! | `ht_sign_fast`  | iterative bottom-up       | yes (with rayon) |
-//!
-//! Verification (`ht_verify`) is shared — it only walks the stored auth
-//! path and does not recompute leaves.
-//!
-//! # Algorithm references (FIPS 205)
-//!
-//! | Alg. 12 | `ht_sign`   | [`ht_sign`] / [`ht_sign_fast`] |
-//! | Alg. 13 | `ht_verify` | [`ht_verify`]                  |
+//! Verification is shared
 
 use crate::adrs::{Adrs, AdrsType};
 use crate::hash::SphincsHasher;
@@ -22,7 +13,7 @@ use crate::xmss::{self, XmssSig};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-/// An HT signature: D XMSS signatures stacked bottom-to-top.
+/// HT signature = D XMSS signatures
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HtSig {
     pub xmss_sigs: Vec<XmssSig>, // length D
@@ -30,12 +21,14 @@ pub struct HtSig {
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
+/// Split tree index into next (leaf, tree)
 #[inline]
 fn next_leaf_and_tree(idx_tree: u64) -> (usize, u64) {
     let mask = (1u64 << HP) - 1;
     ((idx_tree & mask) as usize, idx_tree >> HP)
 }
 
+/// Build ADRS for a given layer
 #[inline]
 fn make_layer_adrs(layer: usize, tree_idx: u64) -> Adrs {
     let mut adrs = Adrs::new(AdrsType::TreeNode);
@@ -46,7 +39,7 @@ fn make_layer_adrs(layer: usize, tree_idx: u64) -> Adrs {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Sign with the **baseline** recursive XMSS strategy (FIPS 205 Alg. 12).
+/// Sign with the **baseline** recursive XMSS strategy (FIPS 205 Alg. 12)
 pub fn ht_sign<S: SphincsHasher>(
     msg: &[u8; N],
     sk_seed: &[u8; N],
@@ -72,7 +65,7 @@ pub fn ht_sign<S: SphincsHasher>(
     HtSig { xmss_sigs: sigs }
 }
 
-/// Sign with the **optimised** iterative + parallel XMSS strategy (Alg. 12).
+/// Sign with the **optimised** iterative + parallel XMSS strategy (Alg. 12)
 ///
 /// Each XMSS layer calls `xmss_sign_fast`, which builds the layer tree
 /// bottom-up in a single pass and (with `--features parallel`) distributes
@@ -103,7 +96,7 @@ pub fn ht_sign_fast<S: SphincsHasher>(
     HtSig { xmss_sigs: sigs }
 }
 
-/// Verify an HT signature (FIPS 205 Alg. 13).  Shared by both strategies.
+/// Verify an HT signature (FIPS 205 Alg. 13).  Shared by both strategies
 pub fn ht_verify<S: SphincsHasher>(
     msg: &[u8; N],
     sig: &HtSig,
