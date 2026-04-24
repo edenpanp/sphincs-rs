@@ -1,7 +1,7 @@
-//! SPHINCS+ parameter set: SHA2-256s (stateless, 256-bit security).
+//! SPHINCS+ parameters (SHA2-256s).
 //!
-//! All constants are derived from the SPHINCS+ specification Table 3.
-//! Reference: FIPS 205 / eprint 2019/1086.
+//! Mostly taken from the spec (Table 3). Values are fixed for this project
+//! We don’t try to re-derive everything here — just use the standard set
 //!
 //! Parameter selection rationale:
 //!   - n=32  → 256-bit security
@@ -13,45 +13,45 @@
 
 // ── Core parameters ──────────────────────────────────────────────────────────
 
-/// Security parameter n: output length of the hash function in bytes.
+/// Security parameter n: output length of the hash function in bytes
 pub const N: usize = 32;
 
-/// Winternitz parameter w: base for WOTS+ digit representation.
+/// Winternitz parameter w: base for WOTS+ digit representation
 pub const W: usize = 16;
 
-/// log₂(W). For W=16 this is 4.
+/// log₂(W). For W=16 this is 4
 pub const LOG_W: usize = 4;
 
-/// Total hypertree height h.
+/// Total hypertree height h
 pub const H: usize = 64;
 
-/// Number of XMSS layers in the hypertree.
+/// Number of XMSS layers in the hypertree
 pub const D: usize = 8;
 
-/// Height per XMSS layer h' = h / d.
+/// Height per XMSS layer h' = h / d
 pub const HP: usize = H / D; // = 8
 
-/// Number of FORS trees k.
+/// Number of FORS trees k
 pub const K: usize = 22;
 
-/// Height of each FORS tree a = log₂(t).
+/// Height of each FORS tree a = log₂(t)
 pub const A: usize = 14;
 
-/// Number of leaves in each FORS tree t = 2^a.
+/// Number of leaves in each FORS tree t = 2^a
 pub const T: usize = 1 << A; // = 16384
 
 // ── WOTS+ derived parameters ─────────────────────────────────────────────────
 
-/// WOTS+ len₁ = ⌈8n / log₂(w)⌉ = ⌈256 / 4⌉ = 64.
-/// Number of n-byte hash values encoding the message.
+/// WOTS+ len₁ = ⌈8n / log₂(w)⌉ = ⌈256 / 4⌉ = 64
+/// Number of n-byte hash values encoding the message
 pub const WOTS_LEN1: usize = (8 * N + LOG_W - 1) / LOG_W; // = 64
 
-/// WOTS+ len₂ = ⌊log₂(len₁·(w−1)) / log₂(w)⌋ + 1 = 3.
-/// Number of n-byte hash values encoding the checksum.
-/// Manually verified: ⌊log₂(64·15) / 4⌋ + 1 = ⌊9.906/4⌋ + 1 = 3.
+/// WOTS+ len₂ = ⌊log₂(len₁·(w−1)) / log₂(w)⌋ + 1 = 3
+/// Number of n-byte hash values encoding the checksum
+/// Manually verified: ⌊log₂(64·15) / 4⌋ + 1 = ⌊9.906/4⌋ + 1 = 3
 pub const WOTS_LEN2: usize = 3;
 
-/// Total WOTS+ signature length in hash values = len₁ + len₂ = 67.
+/// Total WOTS+ signature length in hash values = len₁ + len₂ = 67
 pub const WOTS_LEN: usize = WOTS_LEN1 + WOTS_LEN2; // = 67
 
 // ── Message digest layout ────────────────────────────────────────────────────
@@ -63,19 +63,19 @@ pub const WOTS_LEN: usize = WOTS_LEN1 + WOTS_LEN2; // = 67
 // idx_tree  → selects the XMSS tree in the hypertree
 // idx_leaf  → selects the WOTS+ leaf within that tree
 
-/// Bytes used for FORS indices: ⌈k·a / 8⌉ = ⌈308 / 8⌉ = 39.
+/// Bytes used for FORS indices: ⌈k·a / 8⌉ = ⌈308 / 8⌉ = 39
 pub const MD_BYTES: usize = (K * A + 7) / 8; // = 39
 
-/// Bytes used for the hypertree tree index: ⌈(h − h/d) / 8⌉ = ⌈56/8⌉ = 7.
+/// Bytes used for the hypertree tree index: ⌈(h − h/d) / 8⌉ = ⌈56/8⌉ = 7
 pub const IDX_TREE_BYTES: usize = (H - H / D + 7) / 8; // = 7
 
-/// Bytes used for the XMSS leaf index: ⌈(h/d) / 8⌉ = ⌈8/8⌉ = 1.
+/// Bytes used for the XMSS leaf index: ⌈(h/d) / 8⌉ = ⌈8/8⌉ = 1
 pub const IDX_LEAF_BYTES: usize = (HP + 7) / 8; // = 1
 
-/// Total message digest length M = MD_BYTES + IDX_TREE_BYTES + IDX_LEAF_BYTES = 47.
+/// Total message digest length M = MD_BYTES + IDX_TREE_BYTES + IDX_LEAF_BYTES = 47
 pub const M: usize = MD_BYTES + IDX_TREE_BYTES + IDX_LEAF_BYTES; // = 47
 
-// ── Sanity checks (evaluated at compile time) ─────────────────────────────────
+// ── Quick sanity checks (evaluated at compile time) ─────────────────────────────────
 
 const _: () = assert!(HP == H / D, "HP must equal H/D");
 const _: () = assert!(WOTS_LEN1 == 64, "WOTS_LEN1 must be 64 for N=32, W=16");
